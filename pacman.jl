@@ -1,8 +1,4 @@
-using Agents
-
-@agent struct Ghost(GridAgent{2})
-    rol::String = "Ghost"
-end
+using Agents, Agents.Pathfinding
 
 matrix = [
     0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0;
@@ -21,29 +17,37 @@ matrix = [
     0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 ]
 
-#se agregó el matrix que vimos en clase. Este es el verdadero mapa que estará 
-#evaluando nuestro mono. Por orden, lo eliminamos cuando estabamos en clase para
-#que se entienda el proceso y la funcionalidad del mapa.
+#function move_along_route!(agent, distance::Int)
+    # Move the agent along its route for 'distance' steps
+    #steps = min(distance, length(agent.route))
+    #for i in 1:steps
+    #    agent.pos = agent.route[1]
+    #    popfirst!(agent.route)
+    #end
+    #return distance - steps
+#end
 
+#function agent_step!(agent, model)
+#    start = agent.pos
+#    goal = (13, 17)
 
-function agent_step!(agent, model)
-    randomwalk!(agent, model)
-    x, y = agent.pos #ponemos posición actual de nuestro mono (agente)
-    movimientos =  [(x+1, y), (x-1, y), (x, y+1), (x, y-1)] #definimos posibles movimientos
-    validos_moves =[]
+#    accessible(p) = begin
+#        x, y = p
+#        1 ≤ x ≤ size(matrix, 1) && 1 ≤ y ≤ size(matrix, 2) && matrix[x, y] == 1
+#    end
 
-    #Después, hay que comprobar que los movimientos que haga nuestro 
-    #monito sean validos (es decir, que sea un camino valido)
-      for (nx, ny) in movimientos
-        if nx ≥ 1 && nx ≤ size(matrix, 1) && ny ≥ 1 && ny ≤ size(matrix, 2)
-            if matrix[nx, ny] == 1
-                push!(validos_moves, (nx, ny))
-            end
-        end
-    end
-    if !isempty(validos_moves)
-        agent.pos = rand(validos_moves)
-    end
+    # If agent has no route or reached goal, recalculate
+#    if isempty(agent.route) && start != goal
+#        path = a_star(start, goal; valid_move=accessible, metric=manhattan)
+#        agent.route = path[2:end]  # Exclude current position
+#    end
+
+#    if !isempty(agent.route)
+#        move_along_route!(agent, 1)  # Move 1 step per tick
+#    end
+#end
+
+@agent struct Ghost(GridAgent{2})
 end
 
 function initialize_model()

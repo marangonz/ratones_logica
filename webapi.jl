@@ -9,7 +9,12 @@ route("/run") do
         push!(agents, ghost)
     end
 
-    json(Dict(:msg => "Adios", "agents" => agents))
+    json(Dict(:msg => "Adios", "agents" => agents, "banana" => banana_pos))
+end
+
+route("/new-banana") do
+    new_banana_pos = place_banana_randomly()
+    json(Dict(:msg => "New banana placed", "banana" => new_banana_pos))
 end
 
 Genie.config.run_as_server = true

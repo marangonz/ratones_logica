@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 const App = () => {
   const [posX, setPosX] = useState(6);
   const [posY, setPosY] = useState(8);
+  const [bananaX, setBananaX] = useState(5);
+  const [bananaY, setBananaY] = useState(5);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -11,6 +13,9 @@ const App = () => {
       .then(res => {
         setPosX(res.agents[0].pos[0]-1);
         setPosY(res.agents[0].pos[1]-1);
+        // Update banana position (convert from 1-based to 0-based indexing)
+        setBananaX(res.banana[0]-1);
+        setBananaY(res.banana[1]-1);
       });
     }, 5000);
 
@@ -45,6 +50,7 @@ const App = () => {
       }
 
         <image x={255 + 25 * posX} y={9 + 25 * posY} href="monkey.png"/>
+        <image x={255 + 25 * bananaX} y={9 + 25 * bananaY} href="banana2.png"/>
       </svg>
     </div>
     

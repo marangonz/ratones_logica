@@ -88,17 +88,27 @@ matrix = [
 
 
 function agent_step!(agent, model)
-    # Check if agent reached the banana
-    if agent.pos == banana_pos
-        # Reached the banana! Place it somewhere else
-        place_banana_randomly()
-        agent.route = [] # Clear route since banana moved
+    # Check if agent reached any banana
+    if agent.pos in banana_positions
+        # Reached a banana! Remove it
+        delete!(banana_positions, agent.pos)
+        agent.route = [] # Clear route since we need to find a new target
         return
     end
     
-    # If no route or route is invalid/empty, calculate new path to banana
-    if isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos)
-        path = a_star_path(agent.pos, banana_pos, matrix)
+    # Find the nearest banana
+    target_banana = find_nearest_banana(agent.pos)
+    
+    if target_banana === nothing
+        # No bananas available, stay in place
+        agent.route = []
+        return
+    end
+    
+    # If no route or route is invalid/empty, or target changed, calculate new path
+    if isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos) || 
+       (length(agent.route) > 0 && agent.route[end] != target_banana)
+        path = a_star_path(agent.pos, target_banana, matrix)
         if length(path) > 1
             agent.route = path[2:end] # Exclude current position
         else
@@ -118,8 +128,8 @@ end
     route::Vector{Tuple{Int,Int}}
 end
 
-# Global variable to store banana position
-banana_pos = (0, 0)
+# Global variable to store banana positions (multiple bananas)
+banana_positions = Set{Tuple{Int,Int}}()
 
 function place_banana_randomly()
     # Find all walkable positions (value = 1)
@@ -131,9 +141,34 @@ function place_banana_randomly()
             end
         end
     end
-    # Pick a random walkable position
-    global banana_pos = rand(walkable_positions)
-    return banana_pos
+    
+    # Pick a random walkable position that doesn't already have a banana
+    available_positions = filter(pos -> !(pos in banana_positions), walkable_positions)
+    if !isempty(available_positions)
+        new_banana_pos = rand(available_positions)
+        push!(banana_positions, new_banana_pos)
+        return new_banana_pos
+    end
+    return nothing # No available positions
+end
+
+function find_nearest_banana(agent_pos)
+    if isempty(banana_positions)
+        return nothing
+    end
+    
+    nearest_banana = nothing
+    min_distance = Inf
+    
+    for banana_pos in banana_positions
+        distance = manhattan_distance(agent_pos, banana_pos)
+        if distance < min_distance
+            min_distance = distance
+            nearest_banana = banana_pos
+        end
+    end
+    
+    return nearest_banana
 end
 
 function initialize_model()
@@ -144,5 +179,8 @@ end
 
 model = initialize_model()
 a = add_agent!(Ghost, pos=(2, 2), route=Tuple{Int,Int}[], model)
-# Place banana randomly on initialization
-place_banana_randomly()
+
+# Place multiple bananas initially
+for i in 1:7  # Start with 7 bananas
+    place_banana_randomly()
+end

@@ -9,12 +9,20 @@ route("/run") do
         push!(agents, ghost)
     end
 
-    json(Dict(:msg => "Adios", "agents" => agents, "banana" => banana_pos))
+    json(Dict(:msg => "Adios", "agents" => agents, "bananas" => collect(banana_positions)))
 end
 
 route("/new-banana") do
     new_banana_pos = place_banana_randomly()
-    json(Dict(:msg => "New banana placed", "banana" => new_banana_pos))
+    if new_banana_pos !== nothing
+        json(Dict(:msg => "New banana placed", "banana" => new_banana_pos, "bananas" => collect(banana_positions)))
+    else
+        json(Dict(:msg => "No available positions for new banana", "bananas" => collect(banana_positions)))
+    end
+end
+
+route("/bananas") do
+    json(Dict(:msg => "Current bananas", "bananas" => collect(banana_positions)))
 end
 
 Genie.config.run_as_server = true

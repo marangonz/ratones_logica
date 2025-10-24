@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 
 const App = () => {
-  const [posX, setPosX] = useState(6);
-  const [posY, setPosY] = useState(8);
+  const [agents, setAgents] = useState([]);
   const [bananas, setBananas] = useState([]);
 
   useEffect(() => {
@@ -10,8 +9,12 @@ const App = () => {
       fetch("http://localhost:8000/run")
       .then(res => res.json())
       .then(res => {
-        setPosX(res.agents[0].pos[0]-1);
-        setPosY(res.agents[0].pos[1]-1);
+        // Update all agent positions (convert from 1-based to 0-based indexing)
+        setAgents(res.agents.map(agent => ({
+          id: agent.id,
+          x: agent.pos[0] - 1,
+          y: agent.pos[1] - 1
+        })));
         // Update banana positions (convert from 1-based to 0-based indexing)
         if (res.bananas) {
           setBananas(res.bananas.map(banana => [banana[0]-1, banana[1]-1]));
@@ -20,7 +23,7 @@ const App = () => {
     }, 1000); // Changed from 5000ms to 1000ms (5x faster)
 
       return () => clearInterval(interval);
-  }, [posX, posY]);
+  }, []);
 
   let matrix = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -49,7 +52,14 @@ const App = () => {
       ))
       }
 
-        <image x={255 + 25 * posX} y={9 + 25 * posY} href="monkey.png"/>
+        {agents.map((agent, index) => (
+          <image 
+            key={agent.id} 
+            x={255 + 25 * agent.x} 
+            y={9 + 25 * agent.y} 
+            href="monkey.png"
+          />
+        ))}
         {bananas.map((banana, index) => (
           <image 
             key={index} 

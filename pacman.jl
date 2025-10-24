@@ -90,25 +90,39 @@ matrix = [
 function agent_step!(agent, model)
     # Check if agent reached any banana
     if agent.pos in banana_positions
-        # Reached a banana! Remove it
+        # Reached a banana! Remove it and clear claims
         delete!(banana_positions, agent.pos)
+        release_banana_claim(agent.pos)
         agent.route = [] # Clear route since we need to find a new target
+        agent.target_banana = nothing
         return
     end
     
-    # Find the nearest banana
-    target_banana = find_nearest_banana(agent.pos)
-    
-    if target_banana === nothing
-        # No bananas available, stay in place
+    # Check if our current target is still valid (not taken by someone else or removed)
+    if agent.target_banana !== nothing && 
+       (!(agent.target_banana in banana_positions) || 
+        (haskey(banana_claims, agent.target_banana) && banana_claims[agent.target_banana] != agent.id))
+        # Our target is no longer valid, clear it
+        agent.target_banana = nothing
         agent.route = []
-        return
     end
     
-    # If no route or route is invalid/empty, or target changed, calculate new path
-    if isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos) || 
-       (length(agent.route) > 0 && agent.route[end] != target_banana)
-        path = a_star_path(agent.pos, target_banana, matrix)
+    # Find a new target if we don't have one
+    if agent.target_banana === nothing
+        target_banana = find_nearest_unclaimed_banana(agent.pos, agent.id)
+        if target_banana !== nothing
+            agent.target_banana = target_banana
+            claim_banana(target_banana, agent.id)
+        else
+            # No bananas available, stay in place
+            agent.route = []
+            return
+        end
+    end
+    
+    # If no route or route is invalid/empty, calculate new path to our target
+    if isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos)
+        path = a_star_path(agent.pos, agent.target_banana, matrix)
         if length(path) > 1
             agent.route = path[2:end] # Exclude current position
         else
@@ -126,10 +140,13 @@ end
 
 @agent struct Ghost(GridAgent{2})
     route::Vector{Tuple{Int,Int}}
+    target_banana::Union{Tuple{Int,Int}, Nothing}
 end
 
 # Global variable to store banana positions (multiple bananas)
 banana_positions = Set{Tuple{Int,Int}}()
+# Global variable to track which bananas are claimed by which agents
+banana_claims = Dict{Tuple{Int,Int}, Int}()  # banana_pos => agent_id
 
 function place_banana_randomly()
     # Find all walkable positions (value = 1)
@@ -152,7 +169,7 @@ function place_banana_randomly()
     return nothing # No available positions
 end
 
-function find_nearest_banana(agent_pos)
+function find_nearest_unclaimed_banana(agent_pos, agent_id)
     if isempty(banana_positions)
         return nothing
     end
@@ -161,6 +178,11 @@ function find_nearest_banana(agent_pos)
     min_distance = Inf
     
     for banana_pos in banana_positions
+        # Skip bananas that are claimed by other agents
+        if haskey(banana_claims, banana_pos) && banana_claims[banana_pos] != agent_id
+            continue
+        end
+        
         distance = manhattan_distance(agent_pos, banana_pos)
         if distance < min_distance
             min_distance = distance
@@ -171,6 +193,18 @@ function find_nearest_banana(agent_pos)
     return nearest_banana
 end
 
+function claim_banana(banana_pos, agent_id)
+    if banana_pos in banana_positions
+        banana_claims[banana_pos] = agent_id
+    end
+end
+
+function release_banana_claim(banana_pos)
+    if haskey(banana_claims, banana_pos)
+        delete!(banana_claims, banana_pos)
+    end
+end
+
 function initialize_model()
     space = GridSpace((14,17); periodic = false, metric = :manhattan)
     model = StandardABM(Ghost, space; agent_step!)
@@ -178,7 +212,9 @@ function initialize_model()
 end
 
 model = initialize_model()
-a = add_agent!(Ghost, pos=(2, 2), route=Tuple{Int,Int}[], model)
+# Add two monkeys at different starting positions
+monkey1 = add_agent!(Ghost, pos=(2, 2), route=Tuple{Int,Int}[], target_banana=nothing, model)
+monkey2 = add_agent!(Ghost, pos=(12, 15), route=Tuple{Int,Int}[], target_banana=nothing, model)
 
 # Place multiple bananas initially
 for i in 1:7  # Start with 7 bananas

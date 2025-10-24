@@ -90,38 +90,36 @@ matrix = [
 function agent_step!(agent, model)
     # Check if agent reached any banana
     if agent.pos in banana_positions
-        # Reached a banana! Remove it and clear claims
+        # Reached a banana! Remove it
         delete!(banana_positions, agent.pos)
-        release_banana_claim(agent.pos)
         agent.route = [] # Clear route since we need to find a new target
         agent.target_banana = nothing
         return
     end
     
-    # Check if our current target is still valid (not taken by someone else or removed)
-    if agent.target_banana !== nothing && 
-       (!(agent.target_banana in banana_positions) || 
-        (haskey(banana_claims, agent.target_banana) && banana_claims[agent.target_banana] != agent.id))
-        # Our target is no longer valid, clear it
+    # Check if our current target still exists
+    if agent.target_banana !== nothing && !(agent.target_banana in banana_positions)
         agent.target_banana = nothing
         agent.route = []
     end
     
-    # Find a new target if we don't have one
-    if agent.target_banana === nothing
-        target_banana = find_nearest_unclaimed_banana(agent.pos, agent.id)
-        if target_banana !== nothing
-            agent.target_banana = target_banana
-            claim_banana(target_banana, agent.id)
-        else
-            # No bananas available, stay in place
-            agent.route = []
-            return
+    # Decide if we should switch targets or find a new one
+    if agent.target_banana === nothing || should_switch_target(agent, model)
+        new_target = find_best_banana_for_agent(agent, model)
+        if new_target !== nothing
+            agent.target_banana = new_target
+            agent.route = [] # Clear route to recalculate
         end
     end
     
-    # If no route or route is invalid/empty, calculate new path to our target
-    if isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos)
+    # If we still don't have a target, just pick the nearest one
+    if agent.target_banana === nothing && !isempty(banana_positions)
+        agent.target_banana = first(banana_positions)  # Just pick any banana
+    end
+    
+    # Calculate path if needed
+    if agent.target_banana !== nothing && 
+       (isempty(agent.route) || (length(agent.route) > 0 && agent.route[1] != agent.pos))
         path = a_star_path(agent.pos, agent.target_banana, matrix)
         if length(path) > 1
             agent.route = path[2:end] # Exclude current position
@@ -145,8 +143,6 @@ end
 
 # Global variable to store banana positions (multiple bananas)
 banana_positions = Set{Tuple{Int,Int}}()
-# Global variable to track which bananas are claimed by which agents
-banana_claims = Dict{Tuple{Int,Int}, Int}()  # banana_pos => agent_id
 
 function place_banana_randomly()
     # Find all walkable positions (value = 1)
@@ -169,40 +165,78 @@ function place_banana_randomly()
     return nothing # No available positions
 end
 
-function find_nearest_unclaimed_banana(agent_pos, agent_id)
+function find_best_banana_for_agent(agent, model)
     if isempty(banana_positions)
         return nothing
     end
     
-    nearest_banana = nothing
-    min_distance = Inf
+    best_banana = nothing
+    best_score = -1
     
     for banana_pos in banana_positions
-        # Skip bananas that are claimed by other agents
-        if haskey(banana_claims, banana_pos) && banana_claims[banana_pos] != agent_id
-            continue
+        our_distance = manhattan_distance(agent.pos, banana_pos)
+        
+        # Calculate a score based on distance and competition
+        # Lower distance = higher score, but also consider competition
+        base_score = 100 - our_distance  # Higher score for closer bananas
+        
+        # Check competition from other agents
+        competition_penalty = 0
+        for other_agent in allagents(model)
+            if other_agent.id != agent.id
+                other_distance = manhattan_distance(other_agent.pos, banana_pos)
+                if other_distance < our_distance
+                    # Another agent is closer, apply penalty
+                    competition_penalty += (our_distance - other_distance) * 10
+                end
+            end
         end
         
-        distance = manhattan_distance(agent_pos, banana_pos)
-        if distance < min_distance
-            min_distance = distance
-            nearest_banana = banana_pos
+        final_score = base_score - competition_penalty
+        
+        if final_score > best_score
+            best_score = final_score
+            best_banana = banana_pos
         end
     end
     
-    return nearest_banana
+    return best_banana
 end
 
-function claim_banana(banana_pos, agent_id)
-    if banana_pos in banana_positions
-        banana_claims[banana_pos] = agent_id
+function should_switch_target(agent, model)
+    if agent.target_banana === nothing
+        return true
     end
-end
-
-function release_banana_claim(banana_pos)
-    if haskey(banana_claims, banana_pos)
-        delete!(banana_claims, banana_pos)
+    
+    # Check if our current target is still the best choice
+    current_banana = agent.target_banana
+    current_distance = manhattan_distance(agent.pos, current_banana)
+    
+    # Count how many other agents are closer to our current target
+    closer_agents = 0
+    for other_agent in allagents(model)
+        if other_agent.id != agent.id
+            other_distance = manhattan_distance(other_agent.pos, current_banana)
+            if other_distance < current_distance
+                closer_agents += 1
+            end
+        end
     end
+    
+    # Switch target if more than 1 agent is significantly closer
+    # or if we find a much better alternative
+    if closer_agents > 0
+        alternative = find_best_banana_for_agent(agent, model)
+        if alternative !== nothing && alternative != current_banana
+            alt_distance = manhattan_distance(agent.pos, alternative)
+            # Switch if the alternative is significantly better
+            if alt_distance < current_distance - 2
+                return true
+            end
+        end
+    end
+    
+    return false
 end
 
 function initialize_model()

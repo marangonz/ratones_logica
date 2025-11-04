@@ -74,18 +74,27 @@ matrix = [
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
 ]
 
+# =====================================
+# === LÓGICA DE PASO PRINCIPAL ========
+# =====================================
+# Se cambia `type` por `state`
 @agent struct Ghost(GridAgent{2})
+    state::Symbol  # :wander o :chase
     route::Vector{Tuple{Int,Int}}
     target_banana::Union{Tuple{Int,Int}, Nothing}
-    type::String
-    dir::Tuple{Int,Int}
-    steps::Int
+    dir::Tuple{Int,Int} # Dirección para el modo wander
+    steps::Int      # Pasos en la misma dirección para el modo wander
 end
+
+const vision_range = 5
 
 # =====================================
 # === BANANAS =========================
 # =====================================
 banana_positions = Set{Tuple{Int,Int}}()
+
+# Constante para definir cuántas bananas reaparecen
+const num_bananas_respawn = 7
 
 function place_banana_randomly()
     walkable_positions = [(i, j) for i in 1:size(matrix, 1), j in 1:size(matrix, 2) if matrix[i, j] == 1]
@@ -98,72 +107,104 @@ function place_banana_randomly()
     return nothing
 end
 
-#a*
-function find_best_banana_for_agent(agent, model)
+# Función para buscar la banana más cercana y menos disputada.
+function find_banana_in_vision(agent, model)
     if isempty(banana_positions)
         return nothing
     end
     
-    best_banana = nothing
-    best_score = -1
+    # Buscar todas las bananas visibles y ordenarlas por distancia
+    visible_bananas = []
     for banana_pos in banana_positions
-        our_distance = manhattan_distance(agent.pos, banana_pos)
-        base_score = 100 - our_distance
-        competition_penalty = 0
+        dist = manhattan_distance(agent.pos, banana_pos)
+        if dist <= vision_range
+            push!(visible_bananas, (banana_pos, dist))
+        end
+    end
+
+    if isempty(visible_bananas)
+        return nothing
+    end
+
+    sort!(visible_bananas, by = x -> x[2]) # Ordenar por distancia (x[2])
+
+    # Encontrar la más cercana que no esté "mejor" reclamada por otro agente
+    for (banana_pos, my_dist) in visible_bananas
+        is_contested_by_closer = false
         for other in allagents(model)
-            if other.id != agent.id
-                d2 = manhattan_distance(other.pos, banana_pos)
-                if d2 < our_distance
-                    competition_penalty += (our_distance - d2) * 10
-                end
+            # Si otro agente está persiguiendo la misma banana
+            if other.id != agent.id && 
+               other.state == :chase && 
+               other.target_banana == banana_pos &&
+               # Y ese otro agente está más cerca que nosotros
+               manhattan_distance(other.pos, banana_pos) < my_dist
+                
+                is_contested_by_closer = true
+                break 
             end
         end
-        score = base_score - competition_penalty
-        if score > best_score
-            best_score, best_banana = score, banana_pos
+        
+        if !is_contested_by_closer
+            return banana_pos
         end
     end
-    return best_banana
+    
+    return nothing # Todas las bananas visibles están mejor reclamadas por otros
 end
 
-function should_switch_target(agent, model)
-    if agent.target_banana === nothing
-        return true
-    end
-    current = agent.target_banana
-    dist = manhattan_distance(agent.pos, current)
-    closer_agents = count(a -> a.id != agent.id && manhattan_distance(a.pos, current) < dist, allagents(model))
-    if closer_agents > 0
-        alt = find_best_banana_for_agent(agent, model)
-        if alt !== nothing && alt != current && manhattan_distance(agent.pos, alt) < dist - 2
-            return true
-        end
-    end
-    return false
-end
-
-function a_star_behavior!(agent, model)
-    if agent.pos in banana_positions
-        delete!(banana_positions, agent.pos)
+# Comportamiento de persecución
+function chase_behavior!(agent, model)
+    #Validar si el objetivo aún existe
+    if agent.target_banana === nothing || !(agent.target_banana in banana_positions)
+        # El objetivo desapareció
+        agent.state = :wander
         agent.route = []
         agent.target_banana = nothing
+        wander_behavior!(agent, model) # Intentar merodear inmediatamente
         return
     end
-    if agent.target_banana !== nothing && !(agent.target_banana in banana_positions)
+
+    # Validar si otro agente está más cerca y también persiguiendo
+    my_dist = manhattan_distance(agent.pos, agent.target_banana)
+    for other in allagents(model)
+        # Si otro agente está persiguiendo lo mismo Y ahora está más cerca
+        if other.id != agent.id && 
+           other.state == :chase && 
+           other.target_banana == agent.target_banana &&
+           manhattan_distance(other.pos, agent.target_banana) < my_dist
+            
+            # Alguien más tiene prioridad, soltamos el objetivo
+            agent.state = :wander
+            agent.route = []
+            agent.target_banana = nothing
+            return 
+        end
+    end
+
+    #Comprobar si llegamos al objetivo
+    if agent.pos == agent.target_banana
+        delete!(banana_positions, agent.pos) # "Comer" la banana
+        # Volver a modo wander
+        agent.state = :wander
+        agent.route = []
         agent.target_banana = nothing
-        agent.route = []
+        return # Termina el turno
     end
-    if agent.target_banana === nothing || should_switch_target(agent, model)
-        agent.target_banana = find_best_banana_for_agent(agent, model)
-        agent.route = []
-    end
-    if agent.target_banana !== nothing && (isempty(agent.route) || agent.route[1] != agent.pos)
+
+    #Recalcular ruta si es necesario
+    if isempty(agent.route)
         path = a_star_path(agent.pos, agent.target_banana, matrix)
         agent.route = length(path) > 1 ? path[2:end] : []
     end
+
+    #Moverse por la ruta
     if !isempty(agent.route)
         next_pos = popfirst!(agent.route)
         move_agent!(agent, next_pos, model)
+    else
+        # No hay ruta, volver a wander
+        agent.state = :wander
+        agent.target_banana = nothing
     end
 end
 
@@ -175,49 +216,92 @@ end
 
 random_direction() = rand([(-1,0),(1,0),(0,-1),(0,1)])
 
-function random_behavior!(agent, model)
-    if agent.pos in banana_positions
-        delete!(banana_positions, agent.pos)
+# Comportamiento de wander
+function wander_behavior!(agent, model)
+    #Buscar bananas antes de moverse
+    seen_banana = find_banana_in_vision(agent, model)
+    if seen_banana !== nothing
+        # Cambiar a modo persecución
+        agent.state = :chase
+        agent.target_banana = seen_banana
+        agent.route = []
+        chase_behavior!(agent, model) # Ejecutar lógica de persecución este mismo turno
         return
     end
+
+    # Comprobar si nos tropezamos con una banana
+    if agent.pos in banana_positions
+        delete!(banana_positions, agent.pos)
+        return # Termina el turno
+    end
     
+    # Lógica de movimiento aleatorio con inercia
     if agent.steps < 5
         dy, dx = agent.dir
         new_pos = (agent.pos[1] + dy, agent.pos[2] + dx)
-        if 1 <= new_pos[1] <= size(matrix, 1) && 1 <= new_pos[2] <= size(matrix, 2) && matrix[new_pos[1], new_pos[2]] == 1
+        
+        # Comprobar límites y muros
+        if 1 <= new_pos[1] <= size(matrix, 1) && 
+           1 <= new_pos[2] <= size(matrix, 2) && 
+           matrix[new_pos[1], new_pos[2]] == 1
+            
             move_agent!(agent, new_pos, model)
             agent.steps += 1
             return
+        else
+            # Chocó con un muro, forzar cambio de dirección
+            agent.steps = 5 
         end
     end
+
+    # Cambiar de dirección (si steps >= 5 o si chocó)
     options = free_neighbors(agent.pos, matrix)
     if !isempty(options)
         new_pos = rand(options)
+        # La nueva dirección es el movimiento que acabamos de decidir
+        agent.dir = (new_pos[1] - agent.pos[1], new_pos[2] - agent.pos[2])
         move_agent!(agent, new_pos, model)
+        agent.steps = 1 # Reiniciar contador (ya dimos 1 paso en la nueva dir)
+    else
+        # Elegir nueva dirección al azar
         agent.dir = random_direction()
         agent.steps = 0
     end
 end
 
 function agent_step!(agent, model)
-    if agent.type == "AStar"
-        a_star_behavior!(agent, model)
-    else
-        random_behavior!(agent, model)
+    if agent.state == :wander
+        wander_behavior!(agent, model)
+    else # agent.state == :chase
+        chase_behavior!(agent, model)
+    end
+end
+
+# Función de paso del modelo para gestionar el reabastecimiento
+function model_step!(model)
+    # Si el set de bananas está vacío
+    if isempty(banana_positions)
+        # Volver a llenar el mapa con bananas
+        for i in 1:num_bananas_respawn
+            place_banana_randomly()
+        end
     end
 end
 
 function initialize_model()
     space = GridSpace((14,17); periodic=false, metric=:manhattan)
-    model = StandardABM(Ghost, space; agent_step!)
+    model = StandardABM(Ghost, space; agent_step!, model_step!)
     
-    add_agent!(Ghost, pos=(2,2), route=[], target_banana=nothing,
-               type="AStar", dir=(0,0), steps=0, model)
+    add_agent!(Ghost, pos=(2,2), 
+               state=:wander, route=[], target_banana=nothing,
+               dir=random_direction(), steps=0, model)
     
-    add_agent!(Ghost, pos=(12,15), route=[], target_banana=nothing,
-               type="Random", dir=random_direction(), steps=0, model)
-    
-    for i in 1:7
+    add_agent!(Ghost, pos=(12,15), 
+               state=:wander, route=[], target_banana=nothing,
+               dir=random_direction(), steps=0, model)
+                      
+    # Usamos la constante para la carga inicial
+    for i in 1:num_bananas_respawn
         place_banana_randomly()
     end
     return model

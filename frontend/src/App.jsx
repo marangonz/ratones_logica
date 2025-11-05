@@ -57,7 +57,7 @@ const App = () => {
             key={agent.id} 
             x={255 + 25 * agent.x} 
             y={9 + 25 * agent.y} 
-            href="monkey.png"
+            href={agent.id === 5 ? "jaguar.png" : "monkey.png"}
           />
         ))}
         {bananas.map((banana, index) => (

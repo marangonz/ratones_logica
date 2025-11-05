@@ -86,6 +86,15 @@ matrix = [
     steps::Int      # Pasos en la misma dirección para el modo wander
 end
 
+@agent struct Gato(GridAgent{2})
+    state::Symbol
+    route::Vector{Tuple{Int,Int}}
+    target_ghost::Union{Int, Nothing}
+    dir::Tuple{Int,Int}
+    steps::Int
+    # Definir propiedades del gato si es necesario
+end
+
 const vision_range = 5
 
 # =====================================
@@ -132,13 +141,11 @@ function find_banana_in_vision(agent, model)
     for (banana_pos, my_dist) in visible_bananas
         is_contested_by_closer = false
         for other in allagents(model)
-            # Si otro agente está persiguiendo la misma banana
-            if other.id != agent.id && 
-               other.state == :chase && 
-               other.target_banana == banana_pos &&
-               # Y ese otro agente está más cerca que nosotros
-               manhattan_distance(other.pos, banana_pos) < my_dist
-                
+            # Solo considerar otros ratones
+            if other isa Ghost && other.id != agent.id && 
+            other.state == :chase && 
+            other.target_banana == banana_pos &&
+            manhattan_distance(other.pos, banana_pos) < my_dist
                 is_contested_by_closer = true
                 break 
             end
@@ -148,7 +155,6 @@ function find_banana_in_vision(agent, model)
             return banana_pos
         end
     end
-    
     return nothing # Todas las bananas visibles están mejor reclamadas por otros
 end
 
@@ -167,13 +173,10 @@ function chase_behavior!(agent, model)
     # Validar si otro agente está más cerca y también persiguiendo
     my_dist = manhattan_distance(agent.pos, agent.target_banana)
     for other in allagents(model)
-        # Si otro agente está persiguiendo lo mismo Y ahora está más cerca
-        if other.id != agent.id && 
-           other.state == :chase && 
-           other.target_banana == agent.target_banana &&
-           manhattan_distance(other.pos, agent.target_banana) < my_dist
-            
-            # Alguien más tiene prioridad, soltamos el objetivo
+        if other isa Ghost && other.id != agent.id &&
+        other.state == :chase &&
+        other.target_banana == agent.target_banana &&
+        manhattan_distance(other.pos, agent.target_banana) < my_dist
             agent.state = :wander
             agent.route = []
             agent.target_banana = nothing
@@ -269,11 +272,80 @@ function wander_behavior!(agent, model)
     end
 end
 
-function agent_step!(agent, model)
+function agent_step!(agent::Ghost, model)
     if agent.state == :wander
         wander_behavior!(agent, model)
     else # agent.state == :chase
         chase_behavior!(agent, model)
+    end
+end
+
+function find_ghost_in_vision(gato::Gato, model)
+    visible_ghosts = [(ghost.id, manhattan_distance(gato.pos, ghost.pos)) for ghost in allagents(model) if ghost isa Ghost && manhattan_distance(gato.pos, ghost.pos) <= vision_range]
+    isempty(visible_ghosts) && return nothing
+    sort!(visible_ghosts, by = x -> x[2]) 
+    return first(visible_ghosts[1])
+end
+
+function chase_behavior!(gato::Gato, model)
+    target = gato.target_ghost !== nothing ? model[gato.target_ghost] : nothing
+    if target === nothing
+        gato.state = :wander
+        gato.route = []
+        gato.target_ghost = nothing
+        return
+    end
+    if gato.pos == target.pos
+        remove_agent!(target, model)
+        gato.state = :wander
+        gato.route = []
+        gato.target_ghost = nothing
+        return
+    end
+    if isempty(gato.route)
+        path = a_star_path(gato.pos, target.pos, matrix)
+        gato.route = length(path) > 1 ? path[2:end] : []
+    end
+    if !isempty(gato.route)
+        move_agent!(gato, popfirst!(gato.route), model)
+    end
+end
+
+function wander_behavior!(gato::Gato, model)
+    seen_ghost = find_ghost_in_vision(gato, model)
+    if seen_ghost !== nothing
+        gato.state = :chase
+        gato.target_ghost = seen_ghost
+        return
+    end
+    if gato.steps < 5
+        dy, dx = gato.dir
+        new_pos = (gato.pos[1] + dy, gato.pos[2] + dx)
+        if 1 <= new_pos[1] <= size(matrix, 1) && 1 <= new_pos[2] <= size(matrix, 2)
+            move_agent!(gato, new_pos, model)
+            gato.steps += 1
+            return
+        else
+            gato.steps = 5
+        end
+    end
+    options = free_neighbors(gato.pos, matrix)
+    if !isempty(options)
+        new_pos = rand(options)
+        gato.dir = (new_pos[1] - gato.pos[1], new_pos[2] - gato.pos[2])
+        move_agent!(gato, new_pos, model)
+        gato.steps = 1
+    else
+        gato.dir = random_direction()
+        gato.steps = 0
+    end
+end
+
+function agent_step!(gato::Gato, model)
+    if gato.state == :wander
+        wander_behavior!(gato, model)
+    else
+        chase_behavior!(gato, model)
     end
 end
 
@@ -288,17 +360,27 @@ function model_step!(model)
     end
 end
 
+
 function initialize_model()
     space = GridSpace((14,17); periodic=false, metric=:manhattan)
-    model = StandardABM(Ghost, space; agent_step!, model_step!)
+    model = StandardABM(Union{Ghost,Gato}, space; agent_step!, model_step!, scheduler=Schedulers.ByID())
     
-    add_agent!(Ghost, pos=(2,2), 
-               state=:wander, route=[], target_banana=nothing,
-               dir=random_direction(), steps=0, model)
+    #Añadimos los ratones
+    positions = [(1,1), (1,17), (14,1), (14,17)]
+    for pos in positions
+        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, model)
+    end
+
+    #Añadimos el gato
+    add_agent!(Gato, pos=(7,9), state=:wander, route=[], target_ghost=nothing, dir=random_direction(), steps=0, model)
+
+    #add_agent!(Ghost, pos=(2,2), 
+     #          state=:wander, route=[], target_banana=nothing,
+      #         dir=random_direction(), steps=0, model)
     
-    add_agent!(Ghost, pos=(12,15), 
-               state=:wander, route=[], target_banana=nothing,
-               dir=random_direction(), steps=0, model)
+    #add_agent!(Ghost, pos=(12,15), 
+     #          state=:wander, route=[], target_banana=nothing,
+      #         dir=random_direction(), steps=0, model)
                       
     # Usamos la constante para la carga inicial
     for i in 1:num_bananas_respawn

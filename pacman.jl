@@ -287,41 +287,76 @@ function find_ghost_in_vision(gato::Gato, model)
     return first(visible_ghosts[1])
 end
 
+# Se añade lógica para re-evaluar el objetivo en cada paso
 function chase_behavior!(gato::Gato, model)
     target = gato.target_ghost !== nothing ? model[gato.target_ghost] : nothing
+    
+    # Validar que el objetivo (ratón) todavía exista
     if target === nothing
         gato.state = :wander
         gato.route = []
         gato.target_ghost = nothing
-        return
+        return # Termina el turno, merodeará en el siguiente
     end
-    if gato.pos == target.pos
+
+    # Re-evaluar el objetivo visible más cercano
+    best_visible_ghost_id = find_ghost_in_vision(gato, model)
+    
+    # Si vemos un ratón, y no es nuestro objetivo actual
+    if best_visible_ghost_id !== nothing && best_visible_ghost_id != gato.target_ghost
+        current_target_dist = manhattan_distance(gato.pos, target.pos)
+        
+        # Comprobar la distancia al nuevo objetivo potencial
+        best_visible_target = model[best_visible_ghost_id]
+        best_visible_dist = manhattan_distance(gato.pos, best_visible_target.pos)
+        
+        # Si el nuevo objetivo está más cerca que el actual, cambiar de objetivo
+        if best_visible_dist < current_target_dist
+            gato.target_ghost = best_visible_ghost_id
+            target = best_visible_target # Actualizar el 'target' local
+            gato.route = [] # Forzar recálculo de ruta
+        end
+    end
+
+    # Recalcular la ruta si está vacía o si el objetivo se movió
+    if isempty(gato.route) || last(gato.route) != target.pos
+        path = a_star_path(gato.pos, target.pos, matrix)
+        gato.route = length(path) > 1 ? path[2:end] : []
+    end
+    
+    # Moverse por la ruta
+    if !isempty(gato.route)
+        move_agent!(gato, popfirst!(gato.route), model)
+    end
+    
+    # Comprobar la captura después de moverse
+    target = gato.target_ghost !== nothing ? model[gato.target_ghost] : nothing
+    if target !== nothing && gato.pos == target.pos
         remove_agent!(target, model)
         gato.state = :wander
         gato.route = []
         gato.target_ghost = nothing
         return
     end
-    if isempty(gato.route)
-        path = a_star_path(gato.pos, target.pos, matrix)
-        gato.route = length(path) > 1 ? path[2:end] : []
-    end
-    if !isempty(gato.route)
-        move_agent!(gato, popfirst!(gato.route), model)
-    end
 end
 
+# Añadida la comprobación de muros
 function wander_behavior!(gato::Gato, model)
     seen_ghost = find_ghost_in_vision(gato, model)
     if seen_ghost !== nothing
         gato.state = :chase
         gato.target_ghost = seen_ghost
+        gato.route = [] 
+        chase_behavior!(gato, model) # Llamar a chase de inmediato
         return
     end
     if gato.steps < 5
         dy, dx = gato.dir
         new_pos = (gato.pos[1] + dy, gato.pos[2] + dx)
-        if 1 <= new_pos[1] <= size(matrix, 1) && 1 <= new_pos[2] <= size(matrix, 2)
+        if 1 <= new_pos[1] <= size(matrix, 1) && 
+           1 <= new_pos[2] <= size(matrix, 2) &&
+           matrix[new_pos[1], new_pos[2]] == 1
+            
             move_agent!(gato, new_pos, model)
             gato.steps += 1
             return
@@ -375,12 +410,12 @@ function initialize_model()
     add_agent!(Gato, pos=(7,9), state=:wander, route=[], target_ghost=nothing, dir=random_direction(), steps=0, model)
 
     #add_agent!(Ghost, pos=(2,2), 
-     #          state=:wander, route=[], target_banana=nothing,
-      #         dir=random_direction(), steps=0, model)
+    #          state=:wander, route=[], target_banana=nothing,
+    #          dir=random_direction(), steps=0, model)
     
     #add_agent!(Ghost, pos=(12,15), 
-     #          state=:wander, route=[], target_banana=nothing,
-      #         dir=random_direction(), steps=0, model)
+    #          state=:wander, route=[], target_banana=nothing,
+    #          dir=random_direction(), steps=0, model)
                       
     # Usamos la constante para la carga inicial
     for i in 1:num_bananas_respawn

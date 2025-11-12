@@ -30,9 +30,12 @@ class Gato:
         self.velocity = vel
         self.scale = scale
         
+        # Collision detection properties
+        self.collision_radius = 25.0  # Cat collision radius
+        
         # Animaciones
         self.anim_angle = 0.0  # ángulo base de animación
-        self.anim_speed = 12.0  # velocidad de animación 
+        self.anim_speed = 22.0  # Ultra-fast animation for maximum fluidity 
         self.cabeza_anim = 0.0  # animación específica de cabeza
         
         # Control de movimiento
@@ -71,10 +74,107 @@ class Gato:
         # Posición inicial específica (no aleatoria)
         self.Position = [100.0, 0.0, 100.0]  # Posición fija para diferenciar del ratón
 
+        # Smooth movement for simulation-controlled cat
+        self.target_position = self.Position.copy()
+        self.interpolation_speed = 0.95  # Near-instant movement for aggressive cat behavior
+        
+        # Collision system
+        self.obstacles = []  # Will be set by main.py
+
         # Dirección inicial
         self.Direction = [0.0, 0.0, -1.0]
 
+    def set_target_position(self, target_pos):
+        """Set target position for smooth simulation movement"""
+        self.target_position = target_pos.copy()
+    
+    def set_obstacles(self, obstacles):
+        """Set obstacle list for collision detection"""
+        self.obstacles = obstacles
+    
+    def check_collision(self, position):
+        """Check if a position would cause collision with obstacles"""
+        for obstacle in self.obstacles:
+            dx = position[0] - obstacle.position[0]
+            dz = position[2] - obstacle.position[2]
+            distance = math.sqrt(dx*dx + dz*dz)
+            
+            if distance < (self.collision_radius + obstacle.radius):
+                return True
+        return False
+    
+    def find_safe_move(self, target_pos):
+        """Find a safe position to move towards that avoids obstacles"""
+        if not self.check_collision(target_pos):
+            return target_pos
+        
+        # If direct path is blocked, try alternative paths
+        current_x, current_y, current_z = self.Position
+        target_x, target_y, target_z = target_pos
+        
+        # Try moving around obstacles by testing different angles
+        for angle_offset in [math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]:
+            # Calculate direction to target
+            dx = target_x - current_x
+            dz = target_z - current_z
+            distance = math.sqrt(dx*dx + dz*dz)
+            
+            if distance > 0:
+                # Apply rotation to direction
+                rotated_dx = dx * math.cos(angle_offset) - dz * math.sin(angle_offset)
+                rotated_dz = dx * math.sin(angle_offset) + dz * math.cos(angle_offset)
+                
+                # Move a small step in the rotated direction
+                step_size = 30.0  # Adjusted step size for navigation
+                new_x = current_x + (rotated_dx / distance) * step_size
+                new_z = current_z + (rotated_dz / distance) * step_size
+                
+                test_pos = [new_x, current_y, new_z]
+                
+                # Keep within bounds
+                test_pos[0] = max(-300, min(300, test_pos[0]))
+                test_pos[2] = max(-300, min(300, test_pos[2]))
+                
+                if not self.check_collision(test_pos):
+                    return test_pos
+        
+        # If no safe path found, stay in place
+        return self.Position.copy()
+
     def update(self):
+        # Handle simulation smooth movement interpolation with collision detection
+        
+        # Find safe target position (avoiding obstacles)
+        safe_target = self.find_safe_move(self.target_position)
+        
+        # Calculate distance to safe target
+        dx = safe_target[0] - self.Position[0]
+        dz = safe_target[2] - self.Position[2]
+        distance = math.sqrt(dx*dx + dz*dz)
+        
+        if distance > 0.1:  # Minimal threshold for precise positioning
+            # Calculate next position with interpolation
+            next_x = self.Position[0] + dx * self.interpolation_speed
+            next_z = self.Position[2] + dz * self.interpolation_speed
+            next_pos = [next_x, self.Position[1], next_z]
+            
+            # Double-check that next position is safe
+            if not self.check_collision(next_pos):
+                self.Position[0] = next_x
+                self.Position[2] = next_z
+                
+                # Update direction to face movement direction
+                norm = math.sqrt(dx*dx + dz*dz) or 1.0
+                self.Direction[0] = dx / norm
+                self.Direction[2] = dz / norm
+                
+                self.en_movimiento = True
+            else:
+                self.en_movimiento = False
+        else:
+            self.en_movimiento = False
+        
+        # Animation updates
         if self.en_movimiento:
             # Animaciones de caminar - similar al ratón
             self.anim_angle += self.anim_speed
@@ -94,8 +194,11 @@ class Gato:
         if self.cabeza_anim > 360:
             self.cabeza_anim -= 360
         
-        # Mantener siempre en el piso
+        # Mantener siempre en el piso y dentro de límites de cámara
         self.Position[1] = 0.0
+        # Keep within camera bounds (±300)
+        self.Position[0] = max(-300, min(300, self.Position[0]))
+        self.Position[2] = max(-300, min(300, self.Position[2]))
                 
     def move_forward(self):
         dx = self.Direction[0] * self.velocity

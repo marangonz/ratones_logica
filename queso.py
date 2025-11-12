@@ -46,22 +46,23 @@ class Queso:
             Queso.modelo.render()
         glPopMatrix()
     
-   # @staticmethod
-  #  def crear_quesos_predefinidos(dim_board=400, scale=1.0):
-  #      posiciones_quesos = [
-  #          [-300, 0, -200],  # Queso 1: esquina lejana izquierda-atrás
-  #          [300, 0, -300],   # Queso 2: esquina lejana derecha-atrás
-  #          [-250, 0, 250],   # Queso 3: esquina lejana izquierda-adelante
-   #         [250, 0, 300],    # Queso 4: esquina lejana derecha-adelante
-   #         [0, 0, 350],      # Queso 5: centro-adelante
-   #         [-350, 0, 0],     # Queso 6: centro-izquierda
-   #         [350, 0, 50]      # Queso 7: centro-derecha
-   #     ]
+    @staticmethod
+    def crear_quesos_predefinidos(dim_board=400, scale=1.0):
+        """Crea una lista de 7 quesos en posiciones predefinidas"""
+        posiciones_quesos = [
+            [-300, 0, -200],  # Queso 1: esquina lejana izquierda-atrás
+            [300, 0, -300],   # Queso 2: esquina lejana derecha-atrás
+            [-250, 0, 250],   # Queso 3: esquina lejana izquierda-adelante
+            [250, 0, 300],    # Queso 4: esquina lejana derecha-adelante
+            [0, 0, 350],      # Queso 5: centro-adelante
+            [-350, 0, 0],     # Queso 6: centro-izquierda
+            [350, 0, 50]      # Queso 7: centro-derecha
+        ]
         
-   #     quesos = []
-   #     for i, posicion in enumerate(posiciones_quesos):
-   #         queso = Queso(dim_board=dim_board, scale=scale, position=posicion)
-   #         quesos.append(queso)
-   #         print(f"Queso {i+1} creado en posición: ({posicion[0]}, {posicion[1]}, {posicion[2]})")
+        quesos = []
+        for i, posicion in enumerate(posiciones_quesos):
+            queso = Queso(dim_board=dim_board, scale=scale, position=posicion)
+            quesos.append(queso)
+            print(f"Queso {i+1} creado en posición: ({posicion[0]}, {posicion[1]}, {posicion[2]})")
         
-   #     return quesos
+        return quesos

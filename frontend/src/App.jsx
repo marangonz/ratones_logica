@@ -15,9 +15,15 @@ const App = () => {
           x: agent.pos[0] - 1,
           y: agent.pos[1] - 1
         })));
+        
         // Update banana positions (convert from 1-based to 0-based indexing)
+        // Ahora procesamos el par [[x,y], tipo] que envía el backend
         if (res.bananas) {
-          setBananas(res.bananas.map(banana => [banana[0]-1, banana[1]-1]));
+          setBananas(res.bananas.map(banana => ({
+            x: banana[0][0] - 1, // Coordenada X (ajustada a índice 0)
+            y: banana[0][1] - 1, // Coordenada Y (ajustada a índice 0)
+            type: banana[1]      // Tipo: "normal" o "special"
+          })));
         }
       });
     }, 1000); // Changed from 5000ms to 1000ms (5x faster)
@@ -60,12 +66,15 @@ const App = () => {
             href={agent.id === 5 ? "jaguar.png" : "monkey.png"}
           />
         ))}
+        {/* Renderizado condicional de la imagen según el tipo */}
         {bananas.map((banana, index) => (
           <image 
             key={index} 
-            x={255 + 25 * banana[0]} 
-            y={9 + 25 * banana[1]} 
-            href="banana2.png"
+            x={255 + 25 * banana.x} 
+            y={9 + 25 * banana.y} 
+            width={20}
+            height={20}
+            href={banana.type === "special" ? "banana_especial.png" : "banana2.png"}
           />
         ))}
       </svg>

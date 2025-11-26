@@ -9,20 +9,38 @@ route("/run") do
         push!(agents, ghost)
     end
 
-    json(Dict(:msg => "Adios", "agents" => agents, "bananas" => collect(banana_positions)))
+    # Transformamos el Dict a una lista de listas [[coords, tipo], ...]
+    # Esto asegura que el JSON sea [[[x,y], "normal"], ...]
+    formatted_bananas = [[pos, type] for (pos, type) in banana_positions]
+
+    json(Dict(:msg => "Adios", "agents" => agents, "bananas" => formatted_bananas))
 end
 
 route("/new-banana") do
-    new_banana_pos = place_banana_randomly()
+    # place_banana_randomly usa :normal por defecto si no se especifica
+    new_banana_pos = place_banana_randomly() 
+    
+    # Formateamos la colección completa para devolverla
+    formatted_bananas = [[pos, type] for (pos, type) in banana_positions]
+
     if new_banana_pos !== nothing
-        json(Dict(:msg => "New banana placed", "banana" => new_banana_pos, "bananas" => collect(banana_positions)))
+        # Recuperamos el tipo de la nueva banana para enviarlo individualmente también
+        new_type = banana_positions[new_banana_pos]
+        
+        json(Dict(
+            :msg => "New banana placed", 
+            "banana" => [new_banana_pos, new_type], # Enviamos [pos, tipo]
+            "bananas" => formatted_bananas
+        ))
     else
-        json(Dict(:msg => "No available positions for new banana", "bananas" => collect(banana_positions)))
+        json(Dict(:msg => "No available positions for new banana", "bananas" => formatted_bananas))
     end
 end
 
 route("/bananas") do
-    json(Dict(:msg => "Current bananas", "bananas" => collect(banana_positions)))
+    # Formateamos para /bananas también
+    formatted_bananas = [[pos, type] for (pos, type) in banana_positions]
+    json(Dict(:msg => "Current bananas", "bananas" => formatted_bananas))
 end
 
 Genie.config.run_as_server = true

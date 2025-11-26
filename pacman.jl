@@ -77,13 +77,14 @@ matrix = [
 # =====================================
 # === LÓGICA DE PASO PRINCIPAL ========
 # =====================================
-# Se cambia `type` por `state`
+# Añadido boost_timer para controlar la duración de la velocidad
 @agent struct Ghost(GridAgent{2})
     state::Symbol  # :wander o :chase
     route::Vector{Tuple{Int,Int}}
     target_banana::Union{Tuple{Int,Int}, Nothing}
     dir::Tuple{Int,Int} # Dirección para el modo wander
     steps::Int      # Pasos en la misma dirección para el modo wander
+    boost_timer::Int # Contador de turnos con velocidad extra
 end
 
 @agent struct Gato(GridAgent{2})
@@ -96,21 +97,25 @@ end
 end
 
 const vision_range = 5
+const boost_duration = 20 # Duración del efecto de velocidad
 
 # =====================================
 # === BANANAS =========================
 # =====================================
-banana_positions = Set{Tuple{Int,Int}}()
+# Ahora es un Diccionario para guardar el tipo de banana (:normal o :special)
+banana_positions = Dict{Tuple{Int,Int}, Symbol}()
 
 # Constante para definir cuántas bananas reaparecen
 const num_bananas_respawn = 7
 
-function place_banana_randomly()
+# Ahora acepta un argumento 'type'
+function place_banana_randomly(type=:normal)
     walkable_positions = [(i, j) for i in 1:size(matrix, 1), j in 1:size(matrix, 2) if matrix[i, j] == 1]
-    available = filter(pos -> !(pos in banana_positions), walkable_positions)
+    # Verificación usando keys() porque ahora es un Dict
+    available = filter(pos -> !haskey(banana_positions, pos), walkable_positions)
     if !isempty(available)
         pos = rand(available)
-        push!(banana_positions, pos)
+        banana_positions[pos] = type # Asignación en Dict
         return pos
     end
     return nothing
@@ -124,7 +129,8 @@ function find_banana_in_vision(agent, model)
     
     # Buscar todas las bananas visibles y ordenarlas por distancia
     visible_bananas = []
-    for banana_pos in banana_positions
+    # Iteramos sobre las llaves del diccionario
+    for banana_pos in keys(banana_positions)
         dist = manhattan_distance(agent.pos, banana_pos)
         if dist <= vision_range
             push!(visible_bananas, (banana_pos, dist))
@@ -160,8 +166,8 @@ end
 
 # Comportamiento de persecución
 function chase_behavior!(agent, model)
-    #Validar si el objetivo aún existe
-    if agent.target_banana === nothing || !(agent.target_banana in banana_positions)
+    # Chequeo de existencia con haskey
+    if agent.target_banana === nothing || !haskey(banana_positions, agent.target_banana)
         # El objetivo desapareció
         agent.state = :wander
         agent.route = []
@@ -186,6 +192,10 @@ function chase_behavior!(agent, model)
 
     #Comprobar si llegamos al objetivo
     if agent.pos == agent.target_banana
+        # Verificar si es especial para activar el boost
+        if banana_positions[agent.pos] == :special
+            agent.boost_timer = boost_duration
+        end
         delete!(banana_positions, agent.pos) # "Comer" la banana
         # Volver a modo wander
         agent.state = :wander
@@ -233,7 +243,11 @@ function wander_behavior!(agent, model)
     end
 
     # Comprobar si nos tropezamos con una banana
-    if agent.pos in banana_positions
+    # Chequeo con haskey y activación de boost
+    if haskey(banana_positions, agent.pos)
+        if banana_positions[agent.pos] == :special
+            agent.boost_timer = boost_duration
+        end
         delete!(banana_positions, agent.pos)
         return # Termina el turno
     end
@@ -272,11 +286,23 @@ function wander_behavior!(agent, model)
     end
 end
 
+# agent_step! ahora maneja la velocidad (múltiples pasos)
 function agent_step!(agent::Ghost, model)
-    if agent.state == :wander
-        wander_behavior!(agent, model)
-    else # agent.state == :chase
-        chase_behavior!(agent, model)
+    # Determinar velocidad basada en el boost
+    current_speed = agent.boost_timer > 0 ? 2 : 1
+    
+    # Disminuir el timer si está activo
+    if agent.boost_timer > 0
+        agent.boost_timer -= 1
+    end
+
+    # Loop de movimiento basado en velocidad
+    for _ in 1:current_speed
+        if agent.state == :wander
+            wander_behavior!(agent, model)
+        else # agent.state == :chase
+            chase_behavior!(agent, model)
+        end
     end
 end
 
@@ -389,8 +415,12 @@ function model_step!(model)
     # Si el set de bananas está vacío
     if isempty(banana_positions)
         # Volver a llenar el mapa con bananas
-        for i in 1:num_bananas_respawn
-            place_banana_randomly()
+        # 5 normales y 2 especiales
+        for i in 1:(num_bananas_respawn - 2)
+            place_banana_randomly(:normal)
+        end
+        for i in 1:2
+            place_banana_randomly(:special)
         end
     end
 end
@@ -403,23 +433,20 @@ function initialize_model()
     #Añadimos los ratones
     positions = [(1,1), (1,17), (14,1), (14,17)]
     for pos in positions
-        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, model)
+        #Añadido boost_timer=0 
+        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, boost_timer=0, model)
     end
 
     #Añadimos el gato
     add_agent!(Gato, pos=(7,9), state=:wander, route=[], target_ghost=nothing, dir=random_direction(), steps=0, model)
-
-    #add_agent!(Ghost, pos=(2,2), 
-    #          state=:wander, route=[], target_banana=nothing,
-    #          dir=random_direction(), steps=0, model)
-    
-    #add_agent!(Ghost, pos=(12,15), 
-    #          state=:wander, route=[], target_banana=nothing,
-    #          dir=random_direction(), steps=0, model)
                       
     # Usamos la constante para la carga inicial
-    for i in 1:num_bananas_respawn
-        place_banana_randomly()
+    # 5 normales y 2 especiales
+    for i in 1:(num_bananas_respawn - 2)
+        place_banana_randomly(:normal)
+    end
+    for i in 1:2
+        place_banana_randomly(:special)
     end
     return model
 end

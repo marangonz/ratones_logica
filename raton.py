@@ -66,7 +66,8 @@ class Raton:
 
         # Smooth movement for simulation-controlled mice
         self.target_position = self.Position.copy()
-        self.interpolation_speed = 0.8  # Maximum interpolation speed for real-time sync
+        self.interpolation_speed = 0.2  # Faster interpolation to keep up with simulation
+        self.max_speed = 20.0 # High speed limit to prevent lagging behind
         
         # Capture state - when caught by cat
         self.captured = False
@@ -143,35 +144,98 @@ class Raton:
         if self.captured:
             return
             
-        # Handle simulation smooth movement interpolation with collision detection
+        # Handle simulation smooth movement interpolation
+        # With advanced collision sliding and SMOOTH turning
         
-        # Find safe target position (avoiding obstacles)
-        safe_target = self.find_safe_move(self.target_position)
-        
-        # Calculate distance to safe target
-        dx = safe_target[0] - self.Position[0]
-        dz = safe_target[2] - self.Position[2]
+        # Calculate distance to target
+        dx = self.target_position[0] - self.Position[0]
+        dz = self.target_position[2] - self.Position[2]
         distance = math.sqrt(dx*dx + dz*dz)
         
-        if distance > 0.1:  # Minimal threshold for precise positioning
-            # Calculate next position with interpolation
-            next_x = self.Position[0] + dx * self.interpolation_speed
-            next_z = self.Position[2] + dz * self.interpolation_speed
-            next_pos = [next_x, self.Position[1], next_z]
+        if distance > 0.1:
+            # Calculate proposed movement
+            move_x = dx * self.interpolation_speed
+            move_z = dz * self.interpolation_speed
             
-            # Double-check that next position is safe
-            if not self.check_collision(next_pos):
-                self.Position[0] = next_x
-                self.Position[2] = next_z
-                
-                # Update direction to face movement direction
-                norm = math.sqrt(dx*dx + dz*dz) or 1.0
-                self.Direction[0] = dx / norm
-                self.Direction[2] = dz / norm
-                
-                self.en_movimiento = True
+            # Cap movement speed to prevent teleporting/glitching
+            move_dist = math.sqrt(move_x*move_x + move_z*move_z)
+            if move_dist > self.max_speed:
+                scale = self.max_speed / move_dist
+                move_x *= scale
+                move_z *= scale
+            
+            # Predict next position
+            test_x = self.Position[0] + move_x
+            test_z = self.Position[2] + move_z
+            
+            # Track actual movement for rotation
+            actual_move_x = move_x
+            actual_move_z = move_z
+            
+            # Check for collision
+            collision_obstacle = None
+            for obstacle in self.obstacles:
+                ox = test_x - obstacle.position[0]
+                oz = test_z - obstacle.position[2]
+                dist = math.sqrt(ox*ox + oz*oz)
+                if dist < (self.collision_radius + obstacle.radius):
+                    collision_obstacle = obstacle
+                    break
+            
+            if collision_obstacle is None:
+                # No collision, move normally
+                self.Position[0] = test_x
+                self.Position[2] = test_z
             else:
-                self.en_movimiento = False
+                # Collision detected! Slide around it (Tangent motion).
+                # Vector from obstacle center to agent (Normal vector)
+                normal_x = self.Position[0] - collision_obstacle.position[0]
+                normal_z = self.Position[2] - collision_obstacle.position[2]
+                norm_len = math.sqrt(normal_x*normal_x + normal_z*normal_z)
+                
+                if norm_len > 0:
+                    normal_x /= norm_len
+                    normal_z /= norm_len
+                    
+                    # Project movement vector onto tangent plane
+                    dot_prod = move_x * normal_x + move_z * normal_z
+                    
+                    # Only subtract the component if it's moving INTO the obstacle
+                    if dot_prod < 0:
+                        slide_x = move_x - dot_prod * normal_x
+                        slide_z = move_z - dot_prod * normal_z
+                        
+                        self.Position[0] += slide_x
+                        self.Position[2] += slide_z
+                        actual_move_x = slide_x
+                        actual_move_z = slide_z
+                    else:
+                        self.Position[0] += move_x
+                        self.Position[2] += move_z
+
+                    # Soft push out to prevent sinking
+                    overlap = (self.collision_radius + collision_obstacle.radius) - norm_len
+                    if overlap > 0:
+                        self.Position[0] += normal_x * overlap * 0.2
+                        self.Position[2] += normal_z * overlap * 0.2
+            
+            # Update direction to face ACTUAL movement direction (Smooth Turn)
+            target_norm = math.sqrt(actual_move_x*actual_move_x + actual_move_z*actual_move_z)
+            if target_norm > 0.001:
+                target_dx = actual_move_x / target_norm
+                target_dz = actual_move_z / target_norm
+                
+                # Interpolate current direction towards target direction (Smoothness factor 0.15)
+                self.Direction[0] += (target_dx - self.Direction[0]) * 0.15
+                self.Direction[2] += (target_dz - self.Direction[2]) * 0.15
+                
+                # Re-normalize
+                d_norm = math.sqrt(self.Direction[0]**2 + self.Direction[2]**2)
+                if d_norm > 0:
+                    self.Direction[0] /= d_norm
+                    self.Direction[2] /= d_norm
+            
+            self.en_movimiento = True
         else:
             self.en_movimiento = False
         

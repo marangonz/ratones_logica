@@ -35,7 +35,7 @@ class Gato:
         
         # Animaciones
         self.anim_angle = 0.0  # ángulo base de animación
-        self.anim_speed = 22.0  # Ultra-fast animation for maximum fluidity 
+        self.anim_speed = 6.0  # Reduced speed for calmer movement
         self.cabeza_anim = 0.0  # animación específica de cabeza
         
         # Control de movimiento
@@ -76,7 +76,8 @@ class Gato:
 
         # Smooth movement for simulation-controlled cat
         self.target_position = self.Position.copy()
-        self.interpolation_speed = 0.95  # Near-instant movement for aggressive cat behavior
+        self.interpolation_speed = 0.2  # Faster interpolation
+        self.max_speed = 20.0 # High speed limit to prevent lagging behind
         
         # Collision system
         self.obstacles = []  # Will be set by main.py
@@ -142,35 +143,110 @@ class Gato:
         return self.Position.copy()
 
     def update(self):
-        # Handle simulation smooth movement interpolation with collision detection
+        # Handle simulation smooth movement interpolation
+        # With advanced collision sliding and SMOOTH turning
         
-        # Find safe target position (avoiding obstacles)
-        safe_target = self.find_safe_move(self.target_position)
-        
-        # Calculate distance to safe target
-        dx = safe_target[0] - self.Position[0]
-        dz = safe_target[2] - self.Position[2]
+        # Calculate distance to target
+        dx = self.target_position[0] - self.Position[0]
+        dz = self.target_position[2] - self.Position[2]
         distance = math.sqrt(dx*dx + dz*dz)
         
         if distance > 0.1:  # Minimal threshold for precise positioning
-            # Calculate next position with interpolation
-            next_x = self.Position[0] + dx * self.interpolation_speed
-            next_z = self.Position[2] + dz * self.interpolation_speed
-            next_pos = [next_x, self.Position[1], next_z]
+            # Calculate desired direction normalized
+            desired_dx = dx / distance
+            desired_dz = dz / distance
             
-            # Double-check that next position is safe
-            if not self.check_collision(next_pos):
-                self.Position[0] = next_x
-                self.Position[2] = next_z
-                
-                # Update direction to face movement direction
-                norm = math.sqrt(dx*dx + dz*dz) or 1.0
-                self.Direction[0] = dx / norm
-                self.Direction[2] = dz / norm
-                
-                self.en_movimiento = True
+            # Check alignment with current direction to prevent "reversing"
+            # self.Direction is normalized
+            alignment = self.Direction[0] * desired_dx + self.Direction[2] * desired_dz
+            
+            turn_factor = 1.0
+            if alignment < -0.1: # Facing away (more than 90 degrees)
+                turn_factor = 0.05 # Turn in place (very slow movement)
+            
+            # Calculate proposed movement
+            move_x = dx * self.interpolation_speed * turn_factor
+            move_z = dz * self.interpolation_speed * turn_factor
+            
+            # Cap movement speed to prevent teleporting/glitching
+            move_dist = math.sqrt(move_x*move_x + move_z*move_z)
+            if move_dist > self.max_speed:
+                scale = self.max_speed / move_dist
+                move_x *= scale
+                move_z *= scale
+            
+            # Predict next position
+            test_x = self.Position[0] + move_x
+            test_z = self.Position[2] + move_z
+            
+            # Track actual movement for rotation
+            actual_move_x = move_x
+            actual_move_z = move_z
+            
+            # Check for collision
+            collision_obstacle = None
+            for obstacle in self.obstacles:
+                ox = test_x - obstacle.position[0]
+                oz = test_z - obstacle.position[2]
+                dist = math.sqrt(ox*ox + oz*oz)
+                if dist < (self.collision_radius + obstacle.radius):
+                    collision_obstacle = obstacle
+                    break
+            
+            if collision_obstacle is None:
+                # No collision, move normally
+                self.Position[0] = test_x
+                self.Position[2] = test_z
             else:
-                self.en_movimiento = False
+                # Collision detected! Slide around it (Tangent motion).
+                # Vector from obstacle center to agent (Normal vector)
+                normal_x = self.Position[0] - collision_obstacle.position[0]
+                normal_z = self.Position[2] - collision_obstacle.position[2]
+                norm_len = math.sqrt(normal_x*normal_x + normal_z*normal_z)
+                
+                if norm_len > 0:
+                    normal_x /= norm_len
+                    normal_z /= norm_len
+                    
+                    # Project movement vector onto tangent plane
+                    dot_prod = move_x * normal_x + move_z * normal_z
+                    
+                    # Only subtract the component if it's moving INTO the obstacle
+                    if dot_prod < 0:
+                        slide_x = move_x - dot_prod * normal_x
+                        slide_z = move_z - dot_prod * normal_z
+                        
+                        self.Position[0] += slide_x
+                        self.Position[2] += slide_z
+                        actual_move_x = slide_x
+                        actual_move_z = slide_z
+                    else:
+                        self.Position[0] += move_x
+                        self.Position[2] += move_z
+
+                    # Soft push out to prevent sinking
+                    overlap = (self.collision_radius + collision_obstacle.radius) - norm_len
+                    if overlap > 0:
+                        self.Position[0] += normal_x * overlap * 0.2
+                        self.Position[2] += normal_z * overlap * 0.2
+            
+            # Update direction to face ACTUAL movement direction (Smooth Turn)
+            target_norm = math.sqrt(actual_move_x*actual_move_x + actual_move_z*actual_move_z)
+            if target_norm > 0.001:
+                target_dx = actual_move_x / target_norm
+                target_dz = actual_move_z / target_norm
+                
+                # Interpolate current direction towards target direction (Smoothness factor 0.15)
+                self.Direction[0] += (target_dx - self.Direction[0]) * 0.15
+                self.Direction[2] += (target_dz - self.Direction[2]) * 0.15
+                
+                # Re-normalize
+                d_norm = math.sqrt(self.Direction[0]**2 + self.Direction[2]**2)
+                if d_norm > 0:
+                    self.Direction[0] /= d_norm
+                    self.Direction[2] /= d_norm
+            
+            self.en_movimiento = True
         else:
             self.en_movimiento = False
         
@@ -239,7 +315,7 @@ class Gato:
     def turn(self, angle_radians):
         # actualizar angulo de cabeza en grados (similar al ratoncito)
         self.angulo_direccion += math.degrees(angle_radians)
-        self.angulo_direccion = max(-6.0, min(6.0, self.angulo_direccion))  # Reducido de -30/30 a -15/15, se supone que eso ayuda
+        self.angulo_direccion = max(-45.0, min(45.0, self.angulo_direccion))  # Increased range for better looking behavior
 
         # Rotar vector de dirección
         c = math.cos(angle_radians)
@@ -263,125 +339,185 @@ class Gato:
                 self.angulo_direccion = 0
 
     def draw(self):
+        # Helper for part transformation
+        def get_part_matrix(px, py, pz, rx, ry, rz, ox=0, oy=0, oz=0):
+            # px,py,pz: Position of the joint on the body (Body Space)
+            # rx,ry,rz: Rotation angles
+            # ox,oy,oz: Offset of the mesh relative to the joint (Mesh Space)
+            
+            # 1. Translate to Joint Position
+            T = np.identity(4, dtype=np.float32)
+            T[0,3], T[1,3], T[2,3] = px, py, pz
+            
+            # 2. Rotate
+            cx, sx = math.cos(rx), math.sin(rx)
+            Rx = np.array([[1,0,0,0], [0,cx,-sx,0], [0,sx,cx,0], [0,0,0,1]], dtype=np.float32)
+            
+            cy, sy = math.cos(ry), math.sin(ry)
+            Ry = np.array([[cy,0,sy,0], [0,1,0,0], [-sy,0,cy,0], [0,0,0,1]], dtype=np.float32)
+            
+            cz, sz = math.cos(rz), math.sin(rz)
+            Rz = np.array([[cz,-sz,0,0], [sz,cz,0,0], [0,0,1,0], [0,0,0,1]], dtype=np.float32)
+            
+            R = Ry @ Rx @ Rz
+            
+            # 3. Apply Mesh Offset (so pivot is at origin)
+            To = np.identity(4, dtype=np.float32)
+            To[0,3], To[1,3], To[2,3] = ox, oy, oz
+            
+            return T @ R @ To
+
+        # Main body transform
         def mat_body(tx, ty, tz, sx, sy, sz, theta_rad):
             c = math.cos(theta_rad)
             s = math.sin(theta_rad)
-          
-            M = np.array([
-                [ sx * c,    0.0,    sz * s,   tx],
-                [ 0.0,       sy,     0.0,      ty],
-                [-sx * s,    0.0,    sz * c,   tz],
-                [ 0.0,       0.0,    0.0,      1.0]
+            
+            # Rotation (Y-axis)
+            R = np.array([
+                [c, 0, s, 0],
+                [0, 1, 0, 0],
+                [-s, 0, c, 0],
+                [0, 0, 0, 1]
             ], dtype=np.float32)
-            return M
-
-        def mat_T_Ry(tx, ty, tz, theta_rad):
-            c = math.cos(theta_rad)
-            s = math.sin(theta_rad)
-            M = np.array([
-                [ c,   0.0,  s,   tx],
-                [ 0.0, 1.0,  0.0, ty],
-                [-s,   0.0,  c,   tz],
-                [ 0.0, 0.0,  0.0, 1.0]
-            ], dtype=np.float32)
-            return M
-
-        def mat_Rx(theta_rad):
-            c = math.cos(theta_rad)
-            s = math.sin(theta_rad)
-            M = np.array([
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0,  c,  -s,  0.0],
-                [0.0,  s,   c,  0.0],
-                [0.0, 0.0, 0.0, 1.0]
-            ], dtype=np.float32)
-            return M
-
-        def mat_T_Rx(tx, ty, tz, theta_rad):
-            c = math.cos(theta_rad)
-            s = math.sin(theta_rad)
-            M = np.array([
-                [1.0, 0.0, 0.0, tx],
-                [0.0,  c,  -s,  ty],
-                [0.0,  s,   c,  tz],
-                [0.0, 0.0, 0.0, 1.0]
-            ], dtype=np.float32)
-            return M
+            
+            # Scale
+            S = np.identity(4, dtype=np.float32)
+            S[0,0], S[1,1], S[2,2] = sx, sy, sz
+            
+            # Translation
+            T = np.identity(4, dtype=np.float32)
+            T[0,3], T[1,3], T[2,3] = tx, ty, tz
+            
+            return T @ R @ S
 
         angle = math.degrees(math.atan2(self.Direction[0], self.Direction[2]))
         theta = math.radians(angle)
         sx = sy = sz = self.scale
         tx, ty, tz = self.Position
 
-        # animaciones
-        if self.en_movimiento:
-            self.anim_angle += self.anim_speed
+        # Animation State
+        # NOTE: Animation update is handled in update(), removing it here to prevent double-speed
+        # if self.en_movimiento:
+        #    self.anim_angle += self.anim_speed
         if self.anim_angle > 360.0:
             self.anim_angle -= 360.0
-        movimiento_pata = math.sin(math.radians(self.anim_angle)) * 8.0  # amplitud menor para gato
-        movimiento_cola = math.sin(math.radians(self.anim_angle * 1.5)) * 5.0 if self.en_movimiento else 0.0
-        cabeza_caminar = math.sin(math.radians(self.cabeza_anim)) * 1.0
+            
+        # --- Animation Parameters ---
+        # Reduced amplitudes to prevent parts from clipping out of the body
+        leg_swing = 8.0   # Drastically reduced to keep legs "closed" and under body
+        tail_wag = 8.0
+        head_bob = 2.0    
+        
+        # Sine waves
+        sin_walk = math.sin(math.radians(self.anim_angle))
+        cos_walk = math.cos(math.radians(self.anim_angle))
+        
+        # Body Bob (Vertical bounce)
+        bob_y = abs(sin_walk) * 0.3 
+        ty += bob_y
 
-        head_offset = (0.0, 0.0, 0.0)        
-        patas_del_derecha_offset = (0.0, 0.0, 0.0)
-        patas_del_izquierda_offset = (0.0, 0.0, 0.0)
-        patas_tras_derecha_offset = (0.0, 0.0, 0.0)
-        patas_tras_izquierda_offset = (0.0, 0.0, 0.0)
-        cola_offset = (0.0, 0.0, 0.0)
-
-        # cuerpo: M_world = T * Ry * S  
+        # --- Render Hierarchy ---
+        
+        # 1. Body
         M_world = mat_body(tx, ty, tz, sx, sy, sz, theta)
-
         glPushMatrix()
         glMultMatrixf(M_world.T)
         Gato.cuerpo.render()
+        
+        # --- Joint Configuration ---
+        # Coordinates are relative to Body Center (0,0,0)
+        
+        # Head: Pivot raised to spine height (3.0) and moved back (-3.3)
+        # Mesh lowered (-0.8) to bury the neck connection
+        p_head = (0.0, 1.5, -1.0) 
+        off_head = (0.0, -0.5, 0.0) 
+        
+        # Tail: Pivot at spine end, mesh pushed IN
+        p_tail = (0.0, 4.0, 5.0)
+        # Shifted mesh RIGHT (X=0.6) to correct visual centering
+        off_tail = (0.6, -0.5, 1.0) 
+        
+        # Legs: Pivots moved inward (0.65) to keep legs under the torso
+        p_fl = (-0.45, 3.0, -2.5)
+        p_fr = ( 0.45, 3.0, -2.5)
+        p_bl = (-0.45, 3.0,  2.5)
+        p_br = ( 0.45, 3.0,  2.5)
+        
+        # Leg Offset: Reduced downward shift so legs sit higher
+        off_leg = (0.0, -0.5, 0.0) 
 
-        # cabeza= T(head_offset) * Ry(self.angulo_direccion) * Rx(cabeza_caminar)
-        local_head = mat_T_Ry(head_offset[0], head_offset[1], head_offset[2],
-                              math.radians(self.angulo_direccion)) @ mat_Rx(math.radians(cabeza_caminar))
+        # --- Draw Parts ---
+
+        # Head (Counter-phase bobbing for natural compensation)
+        head_ry = math.radians(self.angulo_direccion)
+        # Head dips slightly when body rises (counter-motion)
+        head_rx = math.radians(-sin_walk * head_bob) if self.en_movimiento else 0
+        M_head = get_part_matrix(*p_head, head_rx, head_ry, 0, *off_head)
         glPushMatrix()
-        glMultMatrixf(local_head.T)
+        glMultMatrixf(M_head.T)
         Gato.cabeza.render()
         glPopMatrix()
         
+        # Tail
+        # "Cute" slow wag: Left-Right motion only, stable height to avoid circular motion
+        if self.en_movimiento:
+            # Slower frequency (0.2) for a lazy/cute wag
+            tail_wag = math.sin(math.radians(self.anim_angle * 0.2)) * 15.0
+            # Stable lift, slightly up (negative is usually up in this rig)
+            tail_lift = -10.0 
+        else:
+            # Idle: Very slow sway
+            tail_wag = math.sin(self.tiempo_idle * 0.05) * 5.0
+            tail_lift = -15.0
+            
+        tail_ry = math.radians(tail_wag)
+        tail_rx = math.radians(tail_lift)
         
-        #pata delantera derecha
-        local_p_dd = mat_T_Rx(patas_del_derecha_offset[0], patas_del_derecha_offset[1], patas_del_derecha_offset[2],
-                              math.radians(movimiento_pata))
+        M_tail = get_part_matrix(*p_tail, tail_rx, tail_ry, 0, *off_tail)
         glPushMatrix()
-        glMultMatrixf(local_p_dd.T)
-        Gato.pata_delantera_derecha.render()
+        glMultMatrixf(M_tail.T)
+        Gato.cola.render()
         glPopMatrix()
-
-        # delantera izquierda 
-        local_p_di = mat_T_Rx(patas_del_izquierda_offset[0], patas_del_izquierda_offset[1], patas_del_izquierda_offset[2],
-                              math.radians(-movimiento_pata))
+        
+        # Legs (Trot Gait with Lift)
+        # FL & BR move together (Group A)
+        # FR & BL move together (Group B)
+        
+        rot_a = math.radians(sin_walk * leg_swing)
+        rot_b = math.radians(-sin_walk * leg_swing)
+        
+        # Leg Lift: Raise the leg slightly during its forward swing to simulate knee bending
+        # Group A moves forward when sin_walk > 0
+        lift_amp = 0.2 # Reduced lift to match smaller swing
+        lift_a = max(0, sin_walk) * lift_amp
+        lift_b = max(0, -sin_walk) * lift_amp
+        
+        # Front Left (A)
+        M_fl = get_part_matrix(p_fl[0], p_fl[1] + lift_a, p_fl[2], rot_a, 0, 0, *off_leg)
         glPushMatrix()
-        glMultMatrixf(local_p_di.T)
+        glMultMatrixf(M_fl.T)
         Gato.pata_delantera_izquierda.render()
         glPopMatrix()
-
-        # trasera derecha )
-        local_p_td = mat_T_Rx(patas_tras_derecha_offset[0], patas_tras_derecha_offset[1], patas_tras_derecha_offset[2],
-                              math.radians(-movimiento_pata))
+        
+        # Front Right (B)
+        M_fr = get_part_matrix(p_fr[0], p_fr[1] + lift_b, p_fr[2], rot_b, 0, 0, *off_leg)
         glPushMatrix()
-        glMultMatrixf(local_p_td.T)
-        Gato.pata_trasera_derecha.render()
+        glMultMatrixf(M_fr.T)
+        Gato.pata_delantera_derecha.render()
         glPopMatrix()
-
-        # trasera izquierda 
-        local_p_ti = mat_T_Rx(patas_tras_izquierda_offset[0], patas_tras_izquierda_offset[1], patas_tras_izquierda_offset[2],
-                              math.radians(movimiento_pata))
+        
+        # Back Left (B)
+        M_bl = get_part_matrix(p_bl[0], p_bl[1] + lift_b, p_bl[2], rot_b, 0, 0, *off_leg)
         glPushMatrix()
-        glMultMatrixf(local_p_ti.T)
+        glMultMatrixf(M_bl.T)
         Gato.pata_trasera_izquierda.render()
         glPopMatrix()
-
-        # Cola: T(cola_offset) * Ry(movimiento_cola) 
-        local_cola = mat_T_Ry(cola_offset[0], cola_offset[1], cola_offset[2], math.radians(movimiento_cola))
+        
+        # Back Right (A)
+        M_br = get_part_matrix(p_br[0], p_br[1] + lift_a, p_br[2], rot_a, 0, 0, *off_leg)
         glPushMatrix()
-        glMultMatrixf(local_cola.T)
-        Gato.cola.render()
+        glMultMatrixf(M_br.T)
+        Gato.pata_trasera_derecha.render()
         glPopMatrix()
 
         glPopMatrix()

@@ -33,6 +33,58 @@ try:
 except ImportError:
     API_AVAILABLE = False
 
+# --- THREADED API CLIENT FOR PERFORMANCE ---
+class JuliaClient:
+    def __init__(self, url):
+        self.url = url
+        self.lock = threading.Lock()
+        self.state = None
+        self.running = True
+        self.should_step = False
+        self.thread = threading.Thread(target=self._loop)
+        self.thread.daemon = True
+        
+    def start(self):
+        self.thread.start()
+        
+    def stop(self):
+        self.running = False
+        
+    def _loop(self):
+        target_interval = 0.15 # ~6-7 FPS - Slower updates for better visual synchronization
+        
+        while self.running:
+            start_time = time.time()
+            try:
+                # 1. Advance Simulation (Step) OR Fetch State
+                if self.should_step:
+                    # /run now returns the full game state, so we don't need a second call
+                    response = requests.get(f"{self.url}/run", timeout=0.5)
+                else:
+                    # Just fetch state if paused
+                    response = requests.get(f"{self.url}/game-state", timeout=0.5)
+                
+                if response.status_code == 200:
+                    with self.lock:
+                        self.state = response.json()
+                
+                # Calculate sleep time to maintain consistent rate
+                elapsed = time.time() - start_time
+                sleep_time = max(0, target_interval - elapsed)
+                time.sleep(sleep_time)
+                
+            except Exception as e:
+                # Connection error, wait a bit before retrying
+                print(f"Connection error: {e}")
+                time.sleep(1.0)
+
+    def get_latest_state(self):
+        with self.lock:
+            return self.state
+
+    def set_stepping(self, enabled):
+        self.should_step = enabled
+
 # Ventana
 screen_width = 1200
 screen_height = 800
@@ -92,8 +144,9 @@ NUM_RATONES = 4
 
 # API Configuration
 API_BASE_URL = "http://localhost:8000"
+julia_client = None
 last_api_update = 0
-API_UPDATE_INTERVAL = 0.02  # Update every 0.02 seconds (50 FPS) for ultra-fluid movement
+API_UPDATE_INTERVAL = 0.15  # Update every 0.15 seconds to match Julia thread
 
 game_over = False
 game_over_time = 0
@@ -277,29 +330,15 @@ def send_cat_position(position):
         pass  # Error sending cat position
     return None
 
-def get_julia_game_state():
-    """Get current game state from Julia Pacman API"""
-    if not API_AVAILABLE:
-        return None
-    try:
-        response = requests.get(f"{API_BASE_URL}/game-state", timeout=0.3)  # Fast timeout for performance
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        # Silent fail for performance
-        pass
-    return None
-
 def update_from_julia_simulation():
     """Update all object positions from Julia Pacman simulation"""
     global ratones, gato, quesos, game_over, game_over_time, simulation_initialized
     
-    try:
-        game_state = get_julia_game_state()
-        if not game_state:
-            return False
-    except Exception as e:
-        # Silently handle connection errors to prevent crashes
+    if not julia_client:
+        return False
+        
+    game_state = julia_client.get_latest_state()
+    if not game_state:
         return False
     
     # Update cheese/banana positions (smooth update - no teleporting)
@@ -366,22 +405,8 @@ def update_from_julia_simulation():
         world_pos = julia_to_python_coords(cat_data["pos"])
         # Cat is always simulation-controlled
         gato.set_target_position(world_pos)
-        # Reduced logging for performance
     
     return True
-
-def step_julia_simulation():
-    """Tell Julia simulation to advance one step"""
-    if not API_AVAILABLE:
-        return False
-    try:
-        response = requests.get(f"{API_BASE_URL}/run", timeout=0.3)  # Fast timeout for performance
-        if response.status_code == 200:
-            return True
-    except Exception as e:
-        # Silent fail for maximum performance
-        pass
-    return False
 
 # Cargar JPEG como textura GL_RGB
 def load_texture_jpeg(filepath, repeat=False):
@@ -484,8 +509,9 @@ def wait_for_julia_connection(max_attempts=30):
     for attempt in range(max_attempts):
         try:
             # Try to get game state
-            game_state = get_julia_game_state()
-            if game_state:
+            response = requests.get(f"{API_BASE_URL}/game-state", timeout=1.0)
+            if response.status_code == 200:
+                game_state = response.json()
                 # Check for complete simulation state
                 has_mice = "mice" in game_state and len(game_state["mice"]) >= 1
                 has_cat = "cat" in game_state and game_state["cat"] is not None
@@ -493,30 +519,19 @@ def wait_for_julia_connection(max_attempts=30):
                 
                 if has_mice and has_cat and has_bananas:
                     return True  # All components are ready
-                
-        except Exception as e:
-            # Connection failed, continue trying
-            pass
-        
-
-        
-        time.sleep(0.5)  # Wait between attempts
-    
-
+            
+            time.sleep(0.5)
+        except Exception:
+            time.sleep(0.5)
+            
     return False
 
 def generar_quesos():
-    """Generar quesos desde la simulación de Julia Pacman"""
-    global quesos, last_cheese_positions
-    if API_AVAILABLE:
-        # Wait for Julia to be ready, then get initial state
-        if wait_for_julia_connection():
-            if update_from_julia_simulation():
-                return
-        
-        # Fallback to local generation if Julia API fails
-        generar_quesos_localmente()
-    else:
+    """Generar quesos inicialmente vacíos, se llenarán con la API"""
+    global quesos
+    quesos = []
+    # Si no hay API, generar localmente de inmediato
+    if not API_AVAILABLE:
         generar_quesos_localmente()
 
 def generar_quesos_localmente():
@@ -535,28 +550,14 @@ def generar_ratones():
     # Obteniendo las direcciones de los obstáculos para colisiones
     obstacles = get_obstacle_list()
     
-    # Creando los 4 ratones en julia
+    # Creando los 4 ratones (inicialmente capturados/invisibles hasta que Julia diga dónde están)
     for i in range(4):  
         raton = Raton(dim_board=DimBoard, vel=1.0, scale=12.0)
         raton.Position = [0.0, 0.0, 0.0]
         raton.Direction = [0.0, 0.0, -1.0]
         raton.set_obstacles(obstacles)
         raton.captured = True 
-        ratones.append(raton)
-    
-    # Obteniendo posiciones julia
-    if API_AVAILABLE:
-        for attempt in range(15): 
-            if update_from_julia_simulation():
-                active_mice = len([r for r in ratones if not r.captured])
-                if active_mice >= 3:  
-                    break
-                elif active_mice > 0: 
-                    time.sleep(0.3) 
-                else:
-                    time.sleep(0.1)  
-            else:
-                time.sleep(0.2) 
+        ratones.append(raton) 
 
 def generar_gato():
     global gato
@@ -749,7 +750,10 @@ Init()
 
 # SINCRONIZACION DE JULIA - MEJORAS
 if API_AVAILABLE:
-    time.sleep(1.0)  
+    julia_client = JuliaClient(API_BASE_URL)
+    julia_client.start()
+    # Removed blocking sleep here to prevent "Not Responding"
+    # time.sleep(1.0)  
 
 while not done:
     keys = pygame.key.get_pressed()
@@ -774,14 +778,16 @@ while not done:
             gato.update()
         
         # Integracion pacman y webapi
-        if API_AVAILABLE:
+        if API_AVAILABLE and julia_client:
             try:
                 current_time = time.time()
+                # We still check interval for updating Python objects, but network is threaded
                 if current_time - last_api_update > API_UPDATE_INTERVAL:
                     active_mice = len([r for r in ratones if not r.captured])
                     
-                    if simulation_initialized and active_mice >= 1:
-                        step_julia_simulation()
+                    # Control simulation stepping via client
+                    should_step = simulation_initialized and active_mice >= 1
+                    julia_client.set_stepping(should_step)
                     
                     was_initialized = simulation_initialized
                     update_from_julia_simulation()
@@ -807,6 +813,8 @@ while not done:
     pygame.display.flip()
     pygame.time.wait(4)
 
+if julia_client:
+    julia_client.stop()
 
 pygame.quit()
 

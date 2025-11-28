@@ -95,11 +95,12 @@ end
     # Definir propiedades del gato si es necesario
 end
 
-const vision_range = 6.5  # Increased vision for more aggressive cat - ORIGINALMENTE 5
+const vision_range = 6  # Increased vision for more aggressive cat - ORIGINALMENTE 5
 
 # =====================================
 # === BANANAS =========================
 # =====================================
+
 banana_positions = Set{Tuple{Int,Int}}()
 
 # Constante para definir cuántas bananas reaparecen

@@ -7,12 +7,25 @@ route("/run") do
     
     # Note: Banana maintenance is handled automatically in model_step!
     
-    agents = []
-    for ghost in allagents(model)
-        push!(agents, ghost)
+    # Collect all agent positions (Same format as /game-state)
+    mice_positions = []
+    cat_position = nothing
+    
+    for agent in allagents(model)
+        if agent isa Ghost
+            push!(mice_positions, Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state)))
+        elseif agent isa Gato
+            cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
+        end
     end
 
-    json(Dict(:msg => "Step completed", "agents" => agents, "bananas" => collect(banana_positions)))
+    json(Dict(
+        :msg => "Step completed", 
+        "mice" => mice_positions,
+        "cat" => cat_position,
+        "bananas" => collect(banana_positions),
+        "grid_size" => [size(matrix, 1), size(matrix, 2)]
+    ))
 end
 
 route("/new-banana") do

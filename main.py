@@ -375,6 +375,9 @@ def update_from_julia_simulation():
                 simulation_initialized = True
         
         # First, mark all mice as captured (invisible)
+        # We track which ones were alive BEFORE this update to detect new captures
+        previously_alive = [i for i, r in enumerate(ratones) if not r.captured]
+        
         for i, raton in enumerate(ratones):
             raton.captured = True  # Will be set to False if mouse still exists
         
@@ -383,6 +386,7 @@ def update_from_julia_simulation():
             pass  # Duplicate mouse IDs detected
         
         # Update positions for mice that still exist in Julia simulation
+        alive_indices = []
         for julia_mouse in julia_mice:
             mouse_id = julia_mouse["id"]
             # Map Julia agent IDs to Python mice indices (1-based to 0-based)
@@ -391,8 +395,19 @@ def update_from_julia_simulation():
                 world_pos = julia_to_python_coords(julia_mouse["pos"])
                 ratones[python_mouse_index].set_target_position(world_pos)
                 ratones[python_mouse_index].captured = False  # This mouse is still alive
+                alive_indices.append(python_mouse_index)
             else:
                 pass  # Mouse ID out of range
+        
+        # Detect if any mouse was JUST captured (was alive, now is not in alive_indices)
+        # Only trigger if simulation is running (not during initialization)
+        if simulation_initialized:
+            for idx in previously_alive:
+                if idx not in alive_indices:
+                    # Mouse 'idx' was just eaten!
+                    if gato:
+                        gato.trigger_eating()
+                    break # Only trigger once per frame even if multiple eaten
                 
         # Check for game over condition
         if len(julia_mice) == 0 and not game_over:

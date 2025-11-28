@@ -84,6 +84,18 @@ class Gato:
 
         # Dirección inicial
         self.Direction = [0.0, 0.0, -1.0]
+        
+        # Eating Animation State
+        self.is_eating = False
+        self.eating_timer = 0.0
+        self.eating_duration = 1.0 # Seconds
+        self.eating_phase = 0.0 # 0 to 1
+
+    def trigger_eating(self):
+        """Start the eating animation"""
+        self.is_eating = True
+        self.eating_timer = self.eating_duration
+        self.eating_phase = 0.0
 
     def set_target_position(self, target_pos):
         """Set target position for smooth simulation movement"""
@@ -249,6 +261,20 @@ class Gato:
             self.en_movimiento = True
         else:
             self.en_movimiento = False
+            
+        # Update Eating Animation
+        if self.is_eating:
+            self.eating_timer -= 0.05 # Assuming ~20-30 FPS update rate in main loop
+            if self.eating_timer <= 0:
+                self.is_eating = False
+                self.eating_phase = 0.0
+            else:
+                # Calculate phase: 0 -> 1 -> 0 (Dip down and up)
+                # Normalized time remaining
+                t = 1.0 - (self.eating_timer / self.eating_duration)
+                # Sine wave for smooth dip: sin(0) -> sin(pi) -> sin(2pi) is not what we want
+                # We want 0 -> 1 -> 0. sin(t * pi) works perfectly.
+                self.eating_phase = math.sin(t * math.pi)
         
         # Animation updates
         if self.en_movimiento:
@@ -452,6 +478,17 @@ class Gato:
         head_ry = math.radians(self.angulo_direccion)
         # Head dips slightly when body rises (counter-motion)
         head_rx = math.radians(-sin_walk * head_bob) if self.en_movimiento else 0
+        
+        # Apply Eating Animation (Override head rotation)
+        if self.is_eating:
+            # Dip head down significantly (e.g., 45 degrees)
+            eat_angle = 45.0 * self.eating_phase
+            head_rx += math.radians(eat_angle)
+            
+            # Also shake head slightly (tearing motion)
+            shake = math.sin(self.eating_phase * 20.0) * 10.0 * self.eating_phase
+            head_ry += math.radians(shake)
+            
         M_head = get_part_matrix(*p_head, head_rx, head_ry, 0, *off_head)
         glPushMatrix()
         glMultMatrixf(M_head.T)

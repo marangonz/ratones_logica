@@ -16,10 +16,11 @@ import math
 class Queso:
     modelo = None
 
-    def __init__(self, dim_board=450, vel=0.5, scale=1.0, position=None):
+    def __init__(self, dim_board=450, vel=0.5, scale=1.0, position=None, is_magic=False):
         self.DimBoard = dim_board
         self.dimension = dim_board
         self.scale = scale
+        self.is_magic = is_magic
 
         self.en_movimiento = False
         
@@ -42,8 +43,20 @@ class Queso:
         glTranslatef(self.Position[0], self.Position[1], self.Position[2])
         glScalef(self.scale, self.scale, self.scale)
         
+        if self.is_magic:
+            # Disable textures to apply pure color
+            glDisable(GL_TEXTURE_2D)
+            # Blue color for magic cheese
+            glColor3f(0.0, 0.5, 1.0) 
+        
         if Queso.modelo:
             Queso.modelo.render()
+            
+        if self.is_magic:
+            # Restore state
+            glColor3f(1.0, 1.0, 1.0)
+            glEnable(GL_TEXTURE_2D)
+            
         glPopMatrix()
     
     @staticmethod

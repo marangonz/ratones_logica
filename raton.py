@@ -66,11 +66,14 @@ class Raton:
 
         # Smooth movement for simulation-controlled mice
         self.target_position = self.Position.copy()
-        self.interpolation_speed = 0.2  # Faster interpolation to keep up with simulation
+        self.interpolation_speed = 0.25  # Tuned for 10 FPS updates at 60 FPS render
         self.max_speed = 20.0 # High speed limit to prevent lagging behind
         
         # Capture state - when caught by cat
         self.captured = False
+        
+        # Powerup state
+        self.powered_up = False
         
         # Collision system
         self.obstacles = []  # Will be set by main.py
@@ -336,6 +339,11 @@ class Raton:
         s = math.sin(t)
         c = math.cos(t)
        
+        # Apply powerup visual effect (Blue tint)
+        if self.powered_up:
+            glDisable(GL_TEXTURE_2D)
+            glColor3f(0.0, 0.5, 1.0) # Blue tint
+
         glPushMatrix()
         glTranslatef(tx, ty, tz)
         glRotatef(angle, 0.0, 1.0, 0.0)
@@ -387,3 +395,8 @@ class Raton:
         glPopMatrix()
 
         glPopMatrix()
+        
+        # Restore color if powered up
+        if self.powered_up:
+            glColor3f(1.0, 1.0, 1.0)
+            glEnable(GL_TEXTURE_2D)

@@ -13,7 +13,12 @@ route("/run") do
     
     for agent in allagents(model)
         if agent isa Ghost
-            push!(mice_positions, Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state)))
+            push!(mice_positions, Dict(
+                "id" => agent.id, 
+                "pos" => [agent.pos[1], agent.pos[2]], 
+                "state" => string(agent.state),
+                "powered_up" => agent.powerup_time > 0
+            ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
         end
@@ -24,6 +29,7 @@ route("/run") do
         "mice" => mice_positions,
         "cat" => cat_position,
         "bananas" => collect(banana_positions),
+        "magic_bananas" => collect(magic_banana_positions),
         "grid_size" => [size(matrix, 1), size(matrix, 2)]
     ))
 end
@@ -57,7 +63,12 @@ route("/game-state") do
     
     for agent in allagents(model)
         if agent isa Ghost
-            push!(mice_positions, Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state)))
+            push!(mice_positions, Dict(
+                "id" => agent.id, 
+                "pos" => [agent.pos[1], agent.pos[2]], 
+                "state" => string(agent.state),
+                "powered_up" => agent.powerup_time > 0
+            ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
         end
@@ -68,6 +79,7 @@ route("/game-state") do
         "mice" => mice_positions,
         "cat" => cat_position,
         "bananas" => collect(banana_positions),
+        "magic_bananas" => collect(magic_banana_positions),
         "grid_size" => [size(matrix, 1), size(matrix, 2)]
     ))
 end

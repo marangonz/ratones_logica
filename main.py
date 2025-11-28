@@ -39,6 +39,7 @@ class JuliaClient:
         self.url = url
         self.lock = threading.Lock()
         self.state = None
+        self.new_data = False # Flag to indicate fresh data
         self.running = True
         self.should_step = False
         self.thread = threading.Thread(target=self._loop)
@@ -51,14 +52,14 @@ class JuliaClient:
         self.running = False
         
     def _loop(self):
-        target_interval = 0.15 # ~6-7 FPS - Slower updates for better visual synchronization
+        target_interval = 0.1 # 10 FPS - Good balance for smoothness
         
         while self.running:
             start_time = time.time()
             try:
                 # 1. Advance Simulation (Step) OR Fetch State
                 if self.should_step:
-                    # /run now returns the full game state, so we don't need a second call
+                    # /run now returns the full game state
                     response = requests.get(f"{self.url}/run", timeout=0.5)
                 else:
                     # Just fetch state if paused
@@ -67,6 +68,7 @@ class JuliaClient:
                 if response.status_code == 200:
                     with self.lock:
                         self.state = response.json()
+                        self.new_data = True # Signal that we have a new frame
                 
                 # Calculate sleep time to maintain consistent rate
                 elapsed = time.time() - start_time
@@ -75,12 +77,15 @@ class JuliaClient:
                 
             except Exception as e:
                 # Connection error, wait a bit before retrying
-                print(f"Connection error: {e}")
+                # print(f"Connection error: {e}")
                 time.sleep(1.0)
 
     def get_latest_state(self):
         with self.lock:
-            return self.state
+            if self.new_data:
+                self.new_data = False
+                return self.state
+            return None # Return None if no new data to avoid reprocessing same frame
 
     def set_stepping(self, enabled):
         self.should_step = enabled
@@ -346,18 +351,32 @@ def update_from_julia_simulation():
         global last_cheese_positions
         
         # Convert Julia positions to a comparable set
-        current_julia_positions = set(tuple(banana_pos) for banana_pos in game_state["bananas"])
+        # We combine normal and magic bananas for the change detection
+        current_normal = set(tuple(p) for p in game_state.get("bananas", []))
+        current_magic = set(tuple(p) for p in game_state.get("magic_bananas", []))
+        
+        # Create a combined signature to detect changes
+        current_signature = (frozenset(current_normal), frozenset(current_magic))
         
         # Only update if cheese positions actually changed in Julia
-        if current_julia_positions != last_cheese_positions:
+        if current_signature != last_cheese_positions:
             quesos.clear()
-            for banana_pos in game_state["bananas"]:
+            
+            # Add normal cheeses
+            for banana_pos in game_state.get("bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
-                queso = Queso(dim_board=DimBoard, scale=1.0)
+                queso = Queso(dim_board=DimBoard, scale=1.0, is_magic=False)
+                queso.Position = world_pos
+                quesos.append(queso)
+                
+            # Add magic cheeses
+            for banana_pos in game_state.get("magic_bananas", []):
+                world_pos = julia_to_python_coords(banana_pos)
+                queso = Queso(dim_board=DimBoard, scale=1.0, is_magic=True)
                 queso.Position = world_pos
                 quesos.append(queso)
             
-            last_cheese_positions = current_julia_positions
+            last_cheese_positions = current_signature
     
     # Update mice positions and handle captured mice
     if "mice" in game_state:
@@ -395,6 +414,19 @@ def update_from_julia_simulation():
                 world_pos = julia_to_python_coords(julia_mouse["pos"])
                 ratones[python_mouse_index].set_target_position(world_pos)
                 ratones[python_mouse_index].captured = False  # This mouse is still alive
+                
+                # Update powerup state
+                is_powered = julia_mouse.get("powered_up", False)
+                ratones[python_mouse_index].powered_up = is_powered
+                
+                # If powered up, increase max speed to allow for the double movement
+                if is_powered:
+                    ratones[python_mouse_index].max_speed = 40.0 # Double speed limit
+                    ratones[python_mouse_index].interpolation_speed = 0.4 # Faster reaction
+                else:
+                    ratones[python_mouse_index].max_speed = 20.0 # Normal speed limit
+                    ratones[python_mouse_index].interpolation_speed = 0.2 # Normal reaction
+                
                 alive_indices.append(python_mouse_index)
             else:
                 pass  # Mouse ID out of range
@@ -795,22 +827,19 @@ while not done:
         # Integracion pacman y webapi
         if API_AVAILABLE and julia_client:
             try:
-                current_time = time.time()
-                # We still check interval for updating Python objects, but network is threaded
-                if current_time - last_api_update > API_UPDATE_INTERVAL:
-                    active_mice = len([r for r in ratones if not r.captured])
-                    
-                    # Control simulation stepping via client
-                    should_step = simulation_initialized and active_mice >= 1
-                    julia_client.set_stepping(should_step)
-                    
-                    was_initialized = simulation_initialized
-                    update_from_julia_simulation()
-                    
+                active_mice = len([r for r in ratones if not r.captured])
+                
+                # Control simulation stepping via client
+                should_step = simulation_initialized and active_mice >= 1
+                julia_client.set_stepping(should_step)
+                
+                was_initialized = simulation_initialized
+                
+                # Update ONLY if new data is available from the thread
+                # This ensures perfect synchronization with the network thread
+                if update_from_julia_simulation():
                     if simulation_initialized and not was_initialized:
                         active_mice = len([r for r in ratones if not r.captured])
-                    
-                    last_api_update = current_time
             except Exception as e:
                 pass
     
@@ -826,7 +855,7 @@ while not done:
         draw_connection_status()
     
     pygame.display.flip()
-    pygame.time.wait(4)
+    clock.tick(60) # Stabilize framerate at 60 FPS for smooth interpolation
 
 if julia_client:
     julia_client.stop()

@@ -76,7 +76,7 @@ class Gato:
 
         # Smooth movement for simulation-controlled cat
         self.target_position = self.Position.copy()
-        self.interpolation_speed = 0.2  # Faster interpolation
+        self.interpolation_speed = 0.25  # Tuned for 10 FPS updates
         self.max_speed = 20.0 # High speed limit to prevent lagging behind
         
         # Collision system

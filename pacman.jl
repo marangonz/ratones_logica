@@ -84,6 +84,7 @@ matrix = [
     target_banana::Union{Tuple{Int,Int}, Nothing}
     dir::Tuple{Int,Int} # Dirección para el modo wander
     steps::Int      # Pasos en la misma dirección para el modo wander
+    powerup_time::Int # Time remaining for speed boost
 end
 
 @agent struct Gato(GridAgent{2})
@@ -102,33 +103,54 @@ const vision_range = 6  # Increased vision for more aggressive cat - ORIGINALMEN
 # =====================================
 
 banana_positions = Set{Tuple{Int,Int}}()
+magic_banana_positions = Set{Tuple{Int,Int}}()
 
 # Constante para definir cuántas bananas reaparecen
 const num_bananas_respawn = 7
 
-function place_banana_randomly()
+function place_banana(is_magic::Bool=false)
     walkable_positions = [(i, j) for i in 1:size(matrix, 1), j in 1:size(matrix, 2) if matrix[i, j] == 1]
-    available = filter(pos -> !(pos in banana_positions), walkable_positions)
+    available = filter(pos -> !(pos in banana_positions) && !(pos in magic_banana_positions), walkable_positions)
     if !isempty(available)
         pos = rand(available)
-        push!(banana_positions, pos)
+        
+        if is_magic
+            push!(magic_banana_positions, pos)
+        else
+            push!(banana_positions, pos)
+        end
         return pos
     end
     return nothing
 end
 
+# Keep for backward compatibility but default to normal
+function place_banana_randomly()
+    return place_banana(false)
+end
+
 # Función para buscar la banana más cercana y menos disputada.
 function find_banana_in_vision(agent, model)
-    if isempty(banana_positions)
+    if isempty(banana_positions) && isempty(magic_banana_positions)
         return nothing
     end
     
     # Buscar todas las bananas visibles y ordenarlas por distancia
     visible_bananas = []
+    
+    # Check normal bananas
     for banana_pos in banana_positions
         dist = manhattan_distance(agent.pos, banana_pos)
         if dist <= vision_range
             push!(visible_bananas, (banana_pos, dist))
+        end
+    end
+    
+    # Check magic bananas (prioritize them by artificially reducing distance)
+    for banana_pos in magic_banana_positions
+        dist = manhattan_distance(agent.pos, banana_pos)
+        if dist <= vision_range
+            push!(visible_bananas, (banana_pos, dist - 2)) # Prioritize magic!
         end
     end
 
@@ -162,7 +184,7 @@ end
 # Comportamiento de persecución
 function chase_behavior!(agent, model)
     #Validar si el objetivo aún existe
-    if agent.target_banana === nothing || !(agent.target_banana in banana_positions)
+    if agent.target_banana === nothing || (!(agent.target_banana in banana_positions) && !(agent.target_banana in magic_banana_positions))
         # El objetivo desapareció
         agent.state = :wander
         agent.route = []
@@ -187,7 +209,13 @@ function chase_behavior!(agent, model)
 
     #Comprobar si llegamos al objetivo
     if agent.pos == agent.target_banana
-        delete!(banana_positions, agent.pos) # "Comer" la banana
+        if agent.pos in banana_positions
+            delete!(banana_positions, agent.pos) # "Comer" la banana normal
+        elseif agent.pos in magic_banana_positions
+            delete!(magic_banana_positions, agent.pos) # "Comer" la banana mágica
+            agent.powerup_time = 20 # ~3 seconds boost
+        end
+        
         # Volver a modo wander
         agent.state = :wander
         agent.route = []
@@ -237,6 +265,10 @@ function wander_behavior!(agent, model)
     if agent.pos in banana_positions
         delete!(banana_positions, agent.pos)
         return # Termina el turno
+    elseif agent.pos in magic_banana_positions
+        delete!(magic_banana_positions, agent.pos)
+        agent.powerup_time = 20 # ~3 seconds boost
+        return
     end
     
     # Lógica de movimiento aleatorio con inercia
@@ -274,10 +306,20 @@ function wander_behavior!(agent, model)
 end
 
 function agent_step!(agent::Ghost, model)
-    if agent.state == :wander
-        wander_behavior!(agent, model)
-    else # agent.state == :chase
-        chase_behavior!(agent, model)
+    # Handle powerup timer
+    if agent.powerup_time > 0
+        agent.powerup_time -= 1
+    end
+
+    # Execute behavior (twice if powered up)
+    steps_to_take = agent.powerup_time > 0 ? 2 : 1
+    
+    for _ in 1:steps_to_take
+        if agent.state == :wander
+            wander_behavior!(agent, model)
+        else # agent.state == :chase
+            chase_behavior!(agent, model)
+        end
     end
 end
 
@@ -391,11 +433,30 @@ end
 
 # Función de paso del modelo para gestionar el reabastecimiento
 function model_step!(model)
-    # Si el set de bananas está vacío
-    if isempty(banana_positions)
-        # Volver a llenar el mapa con bananas
-        for i in 1:num_bananas_respawn
-            place_banana_randomly()
+    # Si el set de bananas está vacío (y no hay mágicas)
+    if isempty(banana_positions) && isempty(magic_banana_positions)
+        
+        # Check if any mouse is currently powered up
+        any_powered_up = false
+        for agent in allagents(model)
+            if agent isa Ghost && agent.powerup_time > 0
+                any_powered_up = true
+                break
+            end
+        end
+        
+        # Logic: 1 in 7 is magic, BUT only if no one is powered up
+        spawn_magic = !any_powered_up
+        
+        count = num_bananas_respawn
+        if spawn_magic
+            place_banana(true) # 1 Magic
+            count -= 1
+        end
+        
+        # Fill the rest with normal bananas
+        for i in 1:count
+            place_banana(false)
         end
     end
 end
@@ -408,7 +469,7 @@ function initialize_model()
     #Añadimos los ratones
     positions = [(1,1), (1,17), (14,17), (3,3)]  # Moved (14,1) to (3,3) for better spacing
     for pos in positions
-        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, model)
+        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, powerup_time=0, model)
     end
 
     #Añadimos el gato
@@ -423,8 +484,10 @@ function initialize_model()
     #          dir=random_direction(), steps=0, model)
                       
     # Usamos la constante para la carga inicial
-    for i in 1:num_bananas_respawn
-        place_banana_randomly()
+    # Initial spawn: 1 Magic, rest Normal (since no one is powered up at start)
+    place_banana(true)
+    for i in 1:(num_bananas_respawn - 1)
+        place_banana(false)
     end
     return model
 end

@@ -18,7 +18,8 @@ route("/run") do
                 "pos" => [agent.pos[1], agent.pos[2]], 
                 "state" => string(agent.state),
                 "powered_up" => agent.powerup_time > 0,
-                "slowed_down" => agent.slowdown_time > 0
+                "slowed_down" => agent.slowdown_time > 0,
+                "smart" => agent.smart
             ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
@@ -74,7 +75,8 @@ route("/game-state") do
                 "pos" => [agent.pos[1], agent.pos[2]], 
                 "state" => string(agent.state),
                 "powered_up" => agent.powerup_time > 0,
-                "slowed_down" => agent.slowdown_time > 0
+                "slowed_down" => agent.slowdown_time > 0,
+                "smart" => agent.smart
             ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))

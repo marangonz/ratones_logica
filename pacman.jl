@@ -86,6 +86,7 @@ matrix = [
     steps::Int      # Pasos en la misma dirección para el modo wander
     powerup_time::Int # Time remaining for speed boost
     slowdown_time::Int # Time remaining for speed penalty
+    smart::Bool # Whether the mouse is smart enough to flee from the cat
 end
 
 @agent struct Gato(GridAgent{2})
@@ -328,6 +329,47 @@ function wander_behavior!(agent, model)
     end
 end
 
+function find_cat_in_vision(agent, model)
+    for other in allagents(model)
+        if other isa Gato
+            dist = manhattan_distance(agent.pos, other.pos)
+            if dist <= vision_range
+                return other.pos
+            end
+        end
+    end
+    return nothing
+end
+
+function flee_behavior!(agent, model, cat_pos)
+    agent.state = :flee
+    agent.route = [] # Clear route if we were chasing
+    agent.target_banana = nothing
+    
+    neighbors = free_neighbors(agent.pos, matrix)
+    if isempty(neighbors)
+        return # Trapped
+    end
+    
+    # Pick neighbor that maximizes distance to cat
+    best_pos = agent.pos
+    max_dist = -1
+    
+    for pos in neighbors
+        d = manhattan_distance(pos, cat_pos)
+        if d > max_dist
+            max_dist = d
+            best_pos = pos
+        end
+    end
+    
+    if best_pos != agent.pos
+        move_agent!(agent, best_pos, model)
+        # Update direction for wander inertia if we switch back
+        agent.dir = (best_pos[1] - agent.pos[1], best_pos[2] - agent.pos[2])
+    end
+end
+
 function agent_step!(agent::Ghost, model)
     # Handle powerup timer
     if agent.powerup_time > 0
@@ -359,7 +401,15 @@ function agent_step!(agent::Ghost, model)
     end
     
     for _ in 1:steps_to_take
-        if agent.state == :wander
+        # Smart logic check
+        cat_pos = nothing
+        if agent.smart
+             cat_pos = find_cat_in_vision(agent, model)
+        end
+
+        if cat_pos !== nothing
+             flee_behavior!(agent, model, cat_pos)
+        elseif agent.state == :wander
             wander_behavior!(agent, model)
         else # agent.state == :chase
             chase_behavior!(agent, model)
@@ -522,8 +572,9 @@ function initialize_model()
     
     #Añadimos los ratones
     positions = [(1,1), (1,17), (14,17), (3,3)]  # Moved (14,1) to (3,3) for better spacing
-    for pos in positions
-        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, powerup_time=0, slowdown_time=0, model)
+    for (i, pos) in enumerate(positions)
+        is_smart = i <= 2 # First 2 are smart, others are not
+        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, powerup_time=0, slowdown_time=0, smart=is_smart, model)
     end
 
     #Añadimos el gato

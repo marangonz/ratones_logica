@@ -36,6 +36,10 @@ class Raton:
         # Nueva variable: controla si el ratón está avanzando
         self.en_movimiento = False
         
+        # Powerup/Slowdown states
+        self.powered_up = False
+        self.slowed_down = False
+        
         # Collision detection properties
         self.collision_radius = 15.0  # Mouse collision radius (smaller than cat)
         
@@ -343,6 +347,9 @@ class Raton:
         if self.powered_up:
             glDisable(GL_TEXTURE_2D)
             glColor3f(0.0, 0.5, 1.0) # Blue tint
+        elif self.slowed_down:
+            glDisable(GL_TEXTURE_2D)
+            glColor3f(0.0, 1.0, 0.0) # Green tint
 
         glPushMatrix()
         glTranslatef(tx, ty, tz)
@@ -396,7 +403,7 @@ class Raton:
 
         glPopMatrix()
         
-        # Restore color if powered up
-        if self.powered_up:
+        # Restore color if powered up or slowed down
+        if self.powered_up or self.slowed_down:
             glColor3f(1.0, 1.0, 1.0)
             glEnable(GL_TEXTURE_2D)

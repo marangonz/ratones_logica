@@ -16,11 +16,16 @@ import math
 class Queso:
     modelo = None
 
-    def __init__(self, dim_board=450, vel=0.5, scale=1.0, position=None, is_magic=False):
+    def __init__(self, dim_board=450, vel=0.5, scale=1.0, position=None, is_magic=False, cheese_type='normal'):
         self.DimBoard = dim_board
         self.dimension = dim_board
         self.scale = scale
         self.is_magic = is_magic
+        self.cheese_type = cheese_type
+
+        # Backward compatibility for is_magic
+        if is_magic and cheese_type == 'normal':
+            self.cheese_type = 'magic'
 
         self.en_movimiento = False
         
@@ -43,16 +48,21 @@ class Queso:
         glTranslatef(self.Position[0], self.Position[1], self.Position[2])
         glScalef(self.scale, self.scale, self.scale)
         
-        if self.is_magic:
+        if self.cheese_type == 'magic':
             # Disable textures to apply pure color
             glDisable(GL_TEXTURE_2D)
             # Blue color for magic cheese
             glColor3f(0.0, 0.5, 1.0) 
+        elif self.cheese_type == 'green':
+            # Disable textures to apply pure color
+            glDisable(GL_TEXTURE_2D)
+            # Green color for green cheese
+            glColor3f(0.0, 1.0, 0.0)
         
         if Queso.modelo:
             Queso.modelo.render()
             
-        if self.is_magic:
+        if self.cheese_type in ['magic', 'green']:
             # Restore state
             glColor3f(1.0, 1.0, 1.0)
             glEnable(GL_TEXTURE_2D)

@@ -17,7 +17,8 @@ route("/run") do
                 "id" => agent.id, 
                 "pos" => [agent.pos[1], agent.pos[2]], 
                 "state" => string(agent.state),
-                "powered_up" => agent.powerup_time > 0
+                "powered_up" => agent.powerup_time > 0,
+                "slowed_down" => agent.slowdown_time > 0
             ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
@@ -30,6 +31,7 @@ route("/run") do
         "cat" => cat_position,
         "bananas" => collect(banana_positions),
         "magic_bananas" => collect(magic_banana_positions),
+        "green_bananas" => collect(green_banana_positions),
         "grid_size" => [size(matrix, 1), size(matrix, 2)]
     ))
 end
@@ -44,7 +46,11 @@ route("/new-banana") do
 end
 
 route("/bananas") do
-    json(Dict(:msg => "Current bananas", "bananas" => collect(banana_positions)))
+    json(Dict(:msg => "Current bananas", 
+        "bananas" => collect(banana_positions),
+        "magic_bananas" => collect(magic_banana_positions),
+        "green_bananas" => collect(green_banana_positions)
+    ))
 end
 
 route("/regenerate-bananas") do
@@ -67,7 +73,8 @@ route("/game-state") do
                 "id" => agent.id, 
                 "pos" => [agent.pos[1], agent.pos[2]], 
                 "state" => string(agent.state),
-                "powered_up" => agent.powerup_time > 0
+                "powered_up" => agent.powerup_time > 0,
+                "slowed_down" => agent.slowdown_time > 0
             ))
         elseif agent isa Gato
             cat_position = Dict("id" => agent.id, "pos" => [agent.pos[1], agent.pos[2]], "state" => string(agent.state))
@@ -80,6 +87,7 @@ route("/game-state") do
         "cat" => cat_position,
         "bananas" => collect(banana_positions),
         "magic_bananas" => collect(magic_banana_positions),
+        "green_bananas" => collect(green_banana_positions),
         "grid_size" => [size(matrix, 1), size(matrix, 2)]
     ))
 end

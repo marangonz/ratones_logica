@@ -351,12 +351,13 @@ def update_from_julia_simulation():
         global last_cheese_positions
         
         # Convert Julia positions to a comparable set
-        # We combine normal and magic bananas for the change detection
+        # We combine normal, magic and green bananas for the change detection
         current_normal = set(tuple(p) for p in game_state.get("bananas", []))
         current_magic = set(tuple(p) for p in game_state.get("magic_bananas", []))
+        current_green = set(tuple(p) for p in game_state.get("green_bananas", []))
         
         # Create a combined signature to detect changes
-        current_signature = (frozenset(current_normal), frozenset(current_magic))
+        current_signature = (frozenset(current_normal), frozenset(current_magic), frozenset(current_green))
         
         # Only update if cheese positions actually changed in Julia
         if current_signature != last_cheese_positions:
@@ -365,14 +366,21 @@ def update_from_julia_simulation():
             # Add normal cheeses
             for banana_pos in game_state.get("bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
-                queso = Queso(dim_board=DimBoard, scale=1.0, is_magic=False)
+                queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='normal')
                 queso.Position = world_pos
                 quesos.append(queso)
                 
             # Add magic cheeses
             for banana_pos in game_state.get("magic_bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
-                queso = Queso(dim_board=DimBoard, scale=1.0, is_magic=True)
+                queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='magic')
+                queso.Position = world_pos
+                quesos.append(queso)
+
+            # Add green cheeses
+            for banana_pos in game_state.get("green_bananas", []):
+                world_pos = julia_to_python_coords(banana_pos)
+                queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='green')
                 queso.Position = world_pos
                 quesos.append(queso)
             
@@ -417,12 +425,17 @@ def update_from_julia_simulation():
                 
                 # Update powerup state
                 is_powered = julia_mouse.get("powered_up", False)
+                is_slowed = julia_mouse.get("slowed_down", False)
                 ratones[python_mouse_index].powered_up = is_powered
+                ratones[python_mouse_index].slowed_down = is_slowed
                 
                 # If powered up, increase max speed to allow for the double movement
                 if is_powered:
                     ratones[python_mouse_index].max_speed = 40.0 # Double speed limit
                     ratones[python_mouse_index].interpolation_speed = 0.4 # Faster reaction
+                elif is_slowed:
+                    ratones[python_mouse_index].max_speed = 10.0 # Half speed limit
+                    ratones[python_mouse_index].interpolation_speed = 0.1 # Slower reaction
                 else:
                     ratones[python_mouse_index].max_speed = 20.0 # Normal speed limit
                     ratones[python_mouse_index].interpolation_speed = 0.2 # Normal reaction

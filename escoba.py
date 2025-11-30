@@ -53,7 +53,7 @@ class Escoba:
             [200, 0, -150],   # Escoba 2: esquina derecha-trasera  
             [-200, 0, 150],   # Escoba 3: esquina izquierda-delantera
             [100, 0, 200],    # Escoba 4: esquina derecha-delantera
-            [0, 0, -250]      # Escoba 5: centro-trasero
+            [-150, 0, -250]   # Escoba 5: MOVED from center [0, 0, -250] to avoid blocking portal
         ]
         
         escobas = []

@@ -1,8 +1,5 @@
 using Agents
 
-# =====================================
-# === A* PATHFINDING UTILITIES ========
-# =====================================
 function manhattan_distance(a, b)
     return abs(a[1] - b[1]) + abs(a[2] - b[2])
 end
@@ -58,6 +55,8 @@ function a_star_path(start, goal, matrix)
 end
 
 matrix = [
+    1 1 1 1 1 0 1 1 1 1 1 1 1 1 1 1 1; 
+    1 1 1 1 1 1 1 1 1 1 1 1 0 1 1 1 1; 
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
@@ -67,26 +66,21 @@ matrix = [
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
+    1 1 1 1 1 1 1 1 1 1 1 1 1 0 1 1 1; 
     1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1;
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1  
 ]
 
-# =====================================
-# === LÓGICA DE PASO PRINCIPAL ========
-# =====================================
-# Se cambia `type` por `state`
 @agent struct Ghost(GridAgent{2})
-    state::Symbol  # :wander o :chase
+    state::Symbol  
     route::Vector{Tuple{Int,Int}}
     target_banana::Union{Tuple{Int,Int}, Nothing}
-    dir::Tuple{Int,Int} # Dirección para el modo wander
-    steps::Int      # Pasos en la misma dirección para el modo wander
-    powerup_time::Int # Time remaining for speed boost
-    slowdown_time::Int # Time remaining for speed penalty
-    smart::Bool # Whether the mouse is smart enough to flee from the cat
+    dir::Tuple{Int,Int} 
+    steps::Int      
+    powerup_time::Int
+    slowdown_time::Int 
+    smart::Bool 
+    teleport_cooldown::Int 
 end
 
 @agent struct Gato(GridAgent{2})
@@ -95,20 +89,14 @@ end
     target_ghost::Union{Int, Nothing}
     dir::Tuple{Int,Int}
     steps::Int
-    # Definir propiedades del gato si es necesario
 end
 
-const vision_range = 6  # Increased vision for more aggressive cat - ORIGINALMENTE 5
-
-# =====================================
-# === BANANAS =========================
-# =====================================
+const vision_range = 6  # Rango de inteligencia/vision para el gato- ORIGINALMENTE 5
 
 banana_positions = Set{Tuple{Int,Int}}()
 magic_banana_positions = Set{Tuple{Int,Int}}()
 green_banana_positions = Set{Tuple{Int,Int}}()
 
-# Constante para definir cuántas bananas reaparecen
 const num_bananas_respawn = 7
 
 function place_banana(type::Symbol=:normal)
@@ -129,21 +117,17 @@ function place_banana(type::Symbol=:normal)
     return nothing
 end
 
-# Keep for backward compatibility but default to normal
 function place_banana_randomly()
     return place_banana(:normal)
 end
 
-# Función para buscar la banana más cercana y menos disputada.
 function find_banana_in_vision(agent, model)
     if isempty(banana_positions) && isempty(magic_banana_positions) && isempty(green_banana_positions)
         return nothing
     end
     
-    # Buscar todas las bananas visibles y ordenarlas por distancia
     visible_bananas = []
     
-    # Check normal bananas
     for banana_pos in banana_positions
         dist = manhattan_distance(agent.pos, banana_pos)
         if dist <= vision_range
@@ -151,19 +135,17 @@ function find_banana_in_vision(agent, model)
         end
     end
     
-    # Check magic bananas (prioritize them by artificially reducing distance)
     for banana_pos in magic_banana_positions
         dist = manhattan_distance(agent.pos, banana_pos)
         if dist <= vision_range
-            push!(visible_bananas, (banana_pos, dist - 2)) # Prioritize magic!
+            push!(visible_bananas, (banana_pos, dist - 2)) 
         end
     end
 
-    # Check green bananas
     for banana_pos in green_banana_positions
         dist = manhattan_distance(agent.pos, banana_pos)
         if dist <= vision_range
-            push!(visible_bananas, (banana_pos, dist)) # Treat as normal
+            push!(visible_bananas, (banana_pos, dist)) 
         end
     end
 
@@ -171,13 +153,12 @@ function find_banana_in_vision(agent, model)
         return nothing
     end
 
-    sort!(visible_bananas, by = x -> x[2]) # Ordenar por distancia (x[2])
+    sort!(visible_bananas, by = x -> x[2])
 
     # Encontrar la más cercana que no esté "mejor" reclamada por otro agente
     for (banana_pos, my_dist) in visible_bananas
         is_contested_by_closer = false
         for other in allagents(model)
-            # Solo considerar otros ratones
             if other isa Ghost && other.id != agent.id && 
             other.state == :chase && 
             other.target_banana == banana_pos &&
@@ -191,18 +172,25 @@ function find_banana_in_vision(agent, model)
             return banana_pos
         end
     end
-    return nothing # Todas las bananas visibles están mejor reclamadas por otros
+    return nothing 
+end
+
+function is_occupied_by_mouse(pos, model, self_agent)
+    for id in ids_in_position(pos, model)
+        if id != self_agent.id && model[id] isa Ghost
+            return true
+        end
+    end
+    return false
 end
 
 # Comportamiento de persecución
 function chase_behavior!(agent, model)
-    #Validar si el objetivo aún existe
     if agent.target_banana === nothing || (!(agent.target_banana in banana_positions) && !(agent.target_banana in magic_banana_positions) && !(agent.target_banana in green_banana_positions))
-        # El objetivo desapareció
         agent.state = :wander
         agent.route = []
         agent.target_banana = nothing
-        wander_behavior!(agent, model) # Intentar merodear inmediatamente
+        wander_behavior!(agent, model) 
         return
     end
 
@@ -223,22 +211,22 @@ function chase_behavior!(agent, model)
     #Comprobar si llegamos al objetivo
     if agent.pos == agent.target_banana
         if agent.pos in banana_positions
-            delete!(banana_positions, agent.pos) # "Comer" la banana normal
+            delete!(banana_positions, agent.pos) 
         elseif agent.pos in magic_banana_positions
-            delete!(magic_banana_positions, agent.pos) # "Comer" la banana mágica
-            agent.powerup_time = 20 # ~3 seconds boost
-            agent.slowdown_time = 0 # Clear slowdown
+            delete!(magic_banana_positions, agent.pos) 
+            agent.powerup_time = 20 
+            agent.slowdown_time = 0 
         elseif agent.pos in green_banana_positions
-            delete!(green_banana_positions, agent.pos) # "Comer" la banana verde
-            agent.slowdown_time = 20 # ~3 seconds slow
-            agent.powerup_time = 0 # Clear powerup
+            delete!(green_banana_positions, agent.pos) 
+            agent.slowdown_time = 20
+            agent.powerup_time = 0
         end
         
         # Volver a modo wander
         agent.state = :wander
         agent.route = []
         agent.target_banana = nothing
-        return # Termina el turno
+        return 
     end
 
     #Recalcular ruta si es necesario
@@ -249,8 +237,11 @@ function chase_behavior!(agent, model)
 
     #Moverse por la ruta
     if !isempty(agent.route)
-        next_pos = popfirst!(agent.route)
-        move_agent!(agent, next_pos, model)
+        next_pos = agent.route[1]
+        if !is_occupied_by_mouse(next_pos, model, agent)
+            popfirst!(agent.route)
+            move_agent!(agent, next_pos, model)
+        end
     else
         # No hay ruta, volver a wander
         agent.state = :wander
@@ -271,27 +262,26 @@ function wander_behavior!(agent, model)
     #Buscar bananas antes de moverse
     seen_banana = find_banana_in_vision(agent, model)
     if seen_banana !== nothing
-        # Cambiar a modo persecución
         agent.state = :chase
         agent.target_banana = seen_banana
         agent.route = []
-        chase_behavior!(agent, model) # Ejecutar lógica de persecución este mismo turno
+        chase_behavior!(agent, model) 
         return
     end
 
     # Comprobar si nos tropezamos con una banana
     if agent.pos in banana_positions
         delete!(banana_positions, agent.pos)
-        return # Termina el turno
+        return 
     elseif agent.pos in magic_banana_positions
         delete!(magic_banana_positions, agent.pos)
-        agent.powerup_time = 20 # ~3 seconds boost
-        agent.slowdown_time = 0 # Clear slowdown
+        agent.powerup_time = 20 
+        agent.slowdown_time = 0 
         return
     elseif agent.pos in green_banana_positions
         delete!(green_banana_positions, agent.pos)
-        agent.slowdown_time = 20 # ~3 seconds slow
-        agent.powerup_time = 0 # Clear powerup
+        agent.slowdown_time = 20 
+        agent.powerup_time = 0 
         return
     end
     
@@ -303,7 +293,8 @@ function wander_behavior!(agent, model)
         # Comprobar límites y muros
         if 1 <= new_pos[1] <= size(matrix, 1) && 
            1 <= new_pos[2] <= size(matrix, 2) && 
-           matrix[new_pos[1], new_pos[2]] == 1
+           matrix[new_pos[1], new_pos[2]] == 1 &&
+           !is_occupied_by_mouse(new_pos, model, agent)
             
             move_agent!(agent, new_pos, model)
             agent.steps += 1
@@ -316,14 +307,15 @@ function wander_behavior!(agent, model)
 
     # Cambiar de dirección (si steps >= 5 o si chocó)
     options = free_neighbors(agent.pos, matrix)
+    options = filter(pos -> !is_occupied_by_mouse(pos, model, agent), options)
+
     if !isempty(options)
         new_pos = rand(options)
         # La nueva dirección es el movimiento que acabamos de decidir
         agent.dir = (new_pos[1] - agent.pos[1], new_pos[2] - agent.pos[2])
         move_agent!(agent, new_pos, model)
-        agent.steps = 1 # Reiniciar contador (ya dimos 1 paso en la nueva dir)
+        agent.steps = 1 
     else
-        # Elegir nueva dirección al azar
         agent.dir = random_direction()
         agent.steps = 0
     end
@@ -343,7 +335,7 @@ end
 
 function flee_behavior!(agent, model, cat_pos)
     agent.state = :flee
-    agent.route = [] # Clear route if we were chasing
+    agent.route = [] 
     agent.target_banana = nothing
     
     neighbors = free_neighbors(agent.pos, matrix)
@@ -351,7 +343,41 @@ function flee_behavior!(agent, model, cat_pos)
         return # Trapped
     end
     
-    # Pick neighbor that maximizes distance to cat
+    # MADRIGUERAS
+    portal_1 = (1, 9)
+    portal_2 = (14, 9)
+    
+    # Comprobar si un portal es accesible y seguro
+    # Si estamos cerca de un portal, priorizarlo como ruta de escape
+    # PERO SOLO si no lo hemos usado recientemente (teleport_cooldown == 0)
+    target_portal = nothing
+    
+    if agent.teleport_cooldown == 0
+        dist_p1 = manhattan_distance(agent.pos, portal_1)
+        dist_p2 = manhattan_distance(agent.pos, portal_2)
+        
+        if dist_p1 <= 3 && manhattan_distance(cat_pos, portal_1) > 2 # Solo si el gato no está acampando la madriguera
+            target_portal = portal_1
+        elseif dist_p2 <= 3 && manhattan_distance(cat_pos, portal_2) > 2
+            target_portal = portal_2
+        end
+    end
+    
+    if target_portal !== nothing
+        # Mover hacia la madriguera
+        path = a_star_path(agent.pos, target_portal, matrix)
+        if length(path) > 1
+            next_pos = path[2]
+            if !is_occupied_by_mouse(next_pos, model, agent)
+                move_agent!(agent, next_pos, model)
+                return
+            end
+        end
+    end
+    
+    # Lógica estándar de huida: Elegir vecino que maximice la distancia al gato
+    neighbors = filter(pos -> !is_occupied_by_mouse(pos, model, agent), neighbors)
+    
     best_pos = agent.pos
     max_dist = -1
     
@@ -365,43 +391,58 @@ function flee_behavior!(agent, model, cat_pos)
     
     if best_pos != agent.pos
         move_agent!(agent, best_pos, model)
-        # Update direction for wander inertia if we switch back
         agent.dir = (best_pos[1] - agent.pos[1], best_pos[2] - agent.pos[2])
     end
 end
 
 function agent_step!(agent::Ghost, model)
-    # Handle powerup timer
     if agent.powerup_time > 0
         agent.powerup_time -= 1
     end
 
-    # Handle slowdown timer
     if agent.slowdown_time > 0
         agent.slowdown_time -= 1
     end
 
-    # Calculate effective speed
-    # Normal: 1 step
-    # Powerup: 2 steps
-    # Slowdown: 0.5 steps (move every other tick)
+    if agent.teleport_cooldown > 0
+        agent.teleport_cooldown -= 1
+    end
+
+    portal_1 = (1, 9)
+    portal_2 = (14, 9)
+    
+    if agent.teleport_cooldown == 0
+        if agent.pos == portal_1
+            if !is_occupied_by_mouse(portal_2, model, agent)
+                move_agent!(agent, portal_2, model)
+                agent.teleport_cooldown = 10 
+                agent.route = [] 
+                return 
+            end
+        elseif agent.pos == portal_2
+            if !is_occupied_by_mouse(portal_1, model, agent)
+                move_agent!(agent, portal_1, model)
+                agent.teleport_cooldown = 10 
+                agent.route = []
+                return
+            end
+        end
+    end
     
     steps_to_take = 1
     
     if agent.powerup_time > 0 && agent.slowdown_time == 0
         steps_to_take = 2
     elseif agent.slowdown_time > 0 && agent.powerup_time == 0
-        # Move only on odd ticks of slowdown (or even, doesn't matter)
         if agent.slowdown_time % 2 == 0
             steps_to_take = 0
         end
     elseif agent.powerup_time > 0 && agent.slowdown_time > 0
-        # They cancel out to normal speed
         steps_to_take = 1
     end
     
     for _ in 1:steps_to_take
-        # Smart logic check
+        # Lógica inteligente
         cat_pos = nothing
         if agent.smart
              cat_pos = find_cat_in_vision(agent, model)
@@ -411,7 +452,7 @@ function agent_step!(agent::Ghost, model)
              flee_behavior!(agent, model, cat_pos)
         elseif agent.state == :wander
             wander_behavior!(agent, model)
-        else # agent.state == :chase
+        else
             chase_behavior!(agent, model)
         end
     end
@@ -420,12 +461,11 @@ end
 function find_ghost_in_vision(gato::Gato, model)
     visible_ghosts = [(ghost.id, manhattan_distance(gato.pos, ghost.pos)) for ghost in allagents(model) if ghost isa Ghost && manhattan_distance(gato.pos, ghost.pos) <= vision_range]
     isempty(visible_ghosts) && return nothing
-    # Always target the closest mouse for maximum efficiency
+    # Siempre apuntar al ratón más cercano para máxima eficiencia
     sort!(visible_ghosts, by = x -> x[2]) 
-    return visible_ghosts[1][1]  # Return ID of closest mouse
+    return visible_ghosts[1][1]  # Devolver ID del ratón más cercano
 end
 
-# Aggressive chase behavior - direct pursuit
 function chase_behavior!(gato::Gato, model)
     target = gato.target_ghost !== nothing ? model[gato.target_ghost] : nothing
     
@@ -437,31 +477,29 @@ function chase_behavior!(gato::Gato, model)
         return
     end
 
-    # Always pursue the closest visible mouse for maximum aggression
+    # Siempre perseguir al ratón visible más cercano para máxima agresividad
     closest_ghost_id = find_ghost_in_vision(gato, model)
     if closest_ghost_id !== nothing
         gato.target_ghost = closest_ghost_id
         target = model[closest_ghost_id]
     end
 
-    # Direct movement towards target (simplified pathfinding)
+    # Movimiento directo hacia el objetivo (búsqueda simplificada)
     target_y, target_x = target.pos
     cat_y, cat_x = gato.pos
     
-    # Calculate direct movement (more aggressive than A*)
+    # Calcular movimiento directo (más agresivo que A*)
     dy = target_y > cat_y ? 1 : (target_y < cat_y ? -1 : 0)
     dx = target_x > cat_x ? 1 : (target_x < cat_x ? -1 : 0)
     
-    # Try to move directly towards target
+    # Intentar moverse directamente hacia el objetivo
     next_pos = (cat_y + dy, cat_x + dx)
     
-    # Check if direct move is valid
     if 1 <= next_pos[1] <= size(matrix, 1) && 
        1 <= next_pos[2] <= size(matrix, 2) && 
        matrix[next_pos[1], next_pos[2]] == 1
         move_agent!(gato, next_pos, model)
     else
-        # If direct path blocked, use A* as fallback
         path = a_star_path(gato.pos, target.pos, matrix)
         if length(path) > 1
             move_agent!(gato, path[2], model)
@@ -478,20 +516,18 @@ function chase_behavior!(gato::Gato, model)
     end
 end
 
-# Aggressive wander - actively hunt for mice
+# Gato wander behavior
 function wander_behavior!(gato::Gato, model)
-    # Look for ANY mouse in vision range (increased range)
     seen_ghost = find_ghost_in_vision(gato, model)
     if seen_ghost !== nothing
         gato.state = :chase
         gato.target_ghost = seen_ghost
         gato.route = [] 
-        chase_behavior!(gato, model) # Switch to chase immediately
-        return
+        chase_behavior!(gato, model)
     end
     
-    # If no mice visible, move more aggressively to find them
-    if gato.steps < 3  # Changed from 5 to 3 for more erratic hunting
+    # Si no detecta a los ratones se vuelve el gato más agresivo
+    if gato.steps < 3  
         dy, dx = gato.dir
         new_pos = (gato.pos[1] + dy, gato.pos[2] + dx)
         if 1 <= new_pos[1] <= size(matrix, 1) && 
@@ -530,7 +566,7 @@ function model_step!(model)
     # Si el set de bananas está vacío (y no hay mágicas ni verdes)
     if isempty(banana_positions) && isempty(magic_banana_positions) && isempty(green_banana_positions)
         
-        # Check if any mouse is currently powered up or slowed down
+        # Checa si el ratón está potenciado o ralentizado, o estado original
         any_powered_up = false
         any_slowed_down = false
         for agent in allagents(model)
@@ -546,19 +582,19 @@ function model_step!(model)
         
         count = num_bananas_respawn
         
-        # Logic: 1 in 7 is magic, BUT only if no one is powered up
+        # ógica: 1 de cada 7 es mágica, PERO solo si ningún ratón está potenciado
         if !any_powered_up
-            place_banana(:magic) # 1 Magic
+            place_banana(:magic)
             count -= 1
         end
 
-        # Logic: Spawn green if no one is slowed down
+        # Sale banana verde si ningún ratón está ralentizado
         if !any_slowed_down && count > 0
-            place_banana(:green) # 1 Green
+            place_banana(:green)
             count -= 1
         end
         
-        # Fill the rest with normal bananas
+        # Llenado de bananas normales hasta el total
         for i in 1:count
             place_banana(:normal)
         end
@@ -570,26 +606,16 @@ function initialize_model()
     space = GridSpace((14,17); periodic=false, metric=:manhattan)
     model = StandardABM(Union{Ghost,Gato}, space; agent_step!, model_step!, scheduler=Schedulers.ByID())
     
-    #Añadimos los ratones
-    positions = [(1,1), (1,17), (14,17), (3,3)]  # Moved (14,1) to (3,3) for better spacing
+    #AGREGA RATONES
+    positions = [(1,1), (1,17), (14,17), (3,3)]  
     for (i, pos) in enumerate(positions)
-        is_smart = i <= 2 # First 2 are smart, others are not
-        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, powerup_time=0, slowdown_time=0, smart=is_smart, model)
+        is_smart = i <= 2
+        add_agent!(Ghost, pos=pos, state=:wander, route=[], target_banana=nothing, dir=random_direction(), steps=0, powerup_time=0, slowdown_time=0, smart=is_smart, teleport_cooldown=0, model)
     end
 
-    #Añadimos el gato
+    #AGREGAMOS EL GATO
     add_agent!(Gato, pos=(7,9), state=:wander, route=[], target_ghost=nothing, dir=random_direction(), steps=0, model)
 
-    #add_agent!(Ghost, pos=(2,2), 
-    #          state=:wander, route=[], target_banana=nothing,
-    #          dir=random_direction(), steps=0, model)
-    
-    #add_agent!(Ghost, pos=(12,15), 
-    #          state=:wander, route=[], target_banana=nothing,
-    #          dir=random_direction(), steps=0, model)
-                      
-    # Usamos la constante para la carga inicial
-    # Initial spawn: 1 Magic, 1 Green, rest Normal
     place_banana(:magic)
     place_banana(:green)
     for i in 1:(num_bananas_respawn - 2)

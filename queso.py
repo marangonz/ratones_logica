@@ -23,7 +23,6 @@ class Queso:
         self.is_magic = is_magic
         self.cheese_type = cheese_type
 
-        # Backward compatibility for is_magic
         if is_magic and cheese_type == 'normal':
             self.cheese_type = 'magic'
 
@@ -49,21 +48,16 @@ class Queso:
         glScalef(self.scale, self.scale, self.scale)
         
         if self.cheese_type == 'magic':
-            # Disable textures to apply pure color
             glDisable(GL_TEXTURE_2D)
-            # Blue color for magic cheese
             glColor3f(0.0, 0.5, 1.0) 
         elif self.cheese_type == 'green':
-            # Disable textures to apply pure color
             glDisable(GL_TEXTURE_2D)
-            # Green color for green cheese
             glColor3f(0.0, 1.0, 0.0)
         
         if Queso.modelo:
             Queso.modelo.render()
             
         if self.cheese_type in ['magic', 'green']:
-            # Restore state
             glColor3f(1.0, 1.0, 1.0)
             glEnable(GL_TEXTURE_2D)
             

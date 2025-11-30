@@ -33,13 +33,12 @@ try:
 except ImportError:
     API_AVAILABLE = False
 
-# --- THREADED API CLIENT FOR PERFORMANCE ---
 class JuliaClient:
     def __init__(self, url):
         self.url = url
         self.lock = threading.Lock()
         self.state = None
-        self.new_data = False # Flag to indicate fresh data
+        self.new_data = False 
         self.running = True
         self.should_step = False
         self.thread = threading.Thread(target=self._loop)
@@ -52,32 +51,26 @@ class JuliaClient:
         self.running = False
         
     def _loop(self):
-        target_interval = 0.1 # 10 FPS - Good balance for smoothness
+        target_interval = 0.1 
         
         while self.running:
             start_time = time.time()
             try:
-                # 1. Advance Simulation (Step) OR Fetch State
                 if self.should_step:
-                    # /run now returns the full game state
                     response = requests.get(f"{self.url}/run", timeout=0.5)
                 else:
-                    # Just fetch state if paused
                     response = requests.get(f"{self.url}/game-state", timeout=0.5)
                 
                 if response.status_code == 200:
                     with self.lock:
                         self.state = response.json()
-                        self.new_data = True # Signal that we have a new frame
+                        self.new_data = True
                 
-                # Calculate sleep time to maintain consistent rate
                 elapsed = time.time() - start_time
                 sleep_time = max(0, target_interval - elapsed)
                 time.sleep(sleep_time)
                 
             except Exception as e:
-                # Connection error, wait a bit before retrying
-                # print(f"Connection error: {e}")
                 time.sleep(1.0)
 
     def get_latest_state(self):
@@ -85,7 +78,7 @@ class JuliaClient:
             if self.new_data:
                 self.new_data = False
                 return self.state
-            return None # Return None if no new data to avoid reprocessing same frame
+            return None 
 
     def set_stepping(self, enabled):
         self.should_step = enabled
@@ -131,6 +124,17 @@ dir = [1.0, 0.0, 0.0]
 theta = 0.0
 
 pygame.init()
+pygame.mixer.init()
+
+# Load sounds
+squeak_sound = None
+try:
+    if os.path.exists("squeak.mp3"):
+        squeak_sound = pygame.mixer.Sound("squeak.mp3")
+    else:
+        print("Warning: squeak.mp3 not found")
+except Exception as e:
+    print(f"Warning: Could not load squeak.mp3: {e}")
 
 # Texturas global
 textures = []
@@ -147,11 +151,11 @@ NUM_QUESOS = 7
 NUM_CAJAS = 4   
 NUM_RATONES = 4  
 
-# API Configuration
+# Configuración de la API
 API_BASE_URL = "http://localhost:8000"
 julia_client = None
 last_api_update = 0
-API_UPDATE_INTERVAL = 0.15  # Update every 0.15 seconds to match Julia thread
+API_UPDATE_INTERVAL = 0.15
 
 game_over = False
 game_over_time = 0
@@ -173,7 +177,6 @@ def get_obstacle_list():
     """Genera la lista de colisiones """
     obstacles = []
     
-    # Add brooms as obstacles (using their predefined positions and scales)
     broom_positions = [
         [-150, 0, -100],  # Escoba 1
         [200, 0, -150],   # Escoba 2  
@@ -182,10 +185,8 @@ def get_obstacle_list():
         [0, 0, -250]      # Escoba 5
     ]
     for pos in broom_positions:
-        # Broom collision radius - adjusted for scale 35.0
         obstacles.append(CollisionObject([pos[0], pos[1], pos[2]], 40.0))
     
-    # Add boxes as obstacles (using their predefined positions and scales)
     box_positions = [
         [-100, 0, -300],  # Caja 1
         [150, 0, -250],   # Caja 2
@@ -193,16 +194,14 @@ def get_obstacle_list():
         [200, 0, 250]     # Caja 4
     ]
     for pos in box_positions:
-        # Box collision radius - adjusted for scale 20.0
         obstacles.append(CollisionObject([pos[0], pos[1], pos[2]], 50.0))
     
     return obstacles
 
 def check_collision(position, agent_radius, obstacles):
-    """Check if a position would cause collision with any obstacles"""
     for obstacle in obstacles:
         dx = position[0] - obstacle.position[0]
-        dz = position[2] - obstacle.position[2]  # Only check X-Z plane
+        dz = position[2] - obstacle.position[2] 
         distance = math.sqrt(dx*dx + dz*dz)
         
         if distance < (agent_radius + obstacle.radius):
@@ -210,40 +209,31 @@ def check_collision(position, agent_radius, obstacles):
     return False
 
 def find_safe_position(current_pos, target_pos, agent_radius, obstacles, max_attempts=8):
-    """Find a safe position near the target that doesn't collide with obstacles"""
     if not check_collision(target_pos, agent_radius, obstacles):
-        return target_pos  # Target is already safe
+        return target_pos 
     
-    # Try positions in a circle around the target
     for i in range(max_attempts):
         angle = (2 * math.pi * i) / max_attempts
-        offset_distance = agent_radius * 2  # Move away from obstacle
+        offset_distance = agent_radius * 2  
         
         safe_x = target_pos[0] + math.cos(angle) * offset_distance
         safe_z = target_pos[2] + math.sin(angle) * offset_distance
         safe_pos = [safe_x, target_pos[1], safe_z]
         
-        # Keep within camera bounds
         safe_pos = clamp_to_camera_bounds(safe_pos)
         
         if not check_collision(safe_pos, agent_radius, obstacles):
             return safe_pos
     
-    # If no safe position found, stay at current position
     return current_pos
 
 def clamp_to_camera_bounds(position, bounds=300):
-    """Ensure position stays within camera visible area"""
-    position[0] = max(-bounds, min(bounds, position[0]))  # X axis
-    position[2] = max(-bounds, min(bounds, position[2]))  # Z axis
+    """Asegura que la posición se mantenga dentro del área visible de la cámara"""
+    position[0] = max(-bounds, min(bounds, position[0]))  # Eje X
+    position[2] = max(-bounds, min(bounds, position[2]))  # Eje Z
     return position
 
 def julia_to_python_coords(julia_pos):
-    """
-    Convert Julia grid coordinates to Python 3D world coordinates 
-    Julia grid: (1,1) to (14,17) - 1-indk exed                                                                                                                                                                                                                                                                                                                                                                                                                                      
-    Python world: Constrained to camera visible area (-300 to +300)
-    """
     grid_y, grid_x = julia_pos 
     
     norm_x = (grid_x - 1) / (JULIA_GRID_WIDTH - 1)  
@@ -257,23 +247,19 @@ def julia_to_python_coords(julia_pos):
     return clamp_to_camera_bounds(position)
 
 def python_to_julia_coords(python_pos):
-    """
-    Convert Python 3D world coordinates to Julia grid coordinates
-    For sending player positions back to Julia
-    """
     world_x, _, world_z = python_pos
     
     camera_visible_area = 300  
     norm_x = world_x / camera_visible_area  
     norm_z = world_z / camera_visible_area  
     
-    grid_x = int((norm_x + 1) / 2 * (JULIA_GRID_WIDTH - 1)) + 1   # 1 to 17
-    grid_y = int((norm_z + 1) / 2 * (JULIA_GRID_HEIGHT - 1)) + 1  # 1 to 14
+    grid_x = int((norm_x + 1) / 2 * (JULIA_GRID_WIDTH - 1)) + 1
+    grid_y = int((norm_z + 1) / 2 * (JULIA_GRID_HEIGHT - 1)) + 1  
     
     grid_x = max(1, min(JULIA_GRID_WIDTH, grid_x))
     grid_y = max(1, min(JULIA_GRID_HEIGHT, grid_y))
-    
-    return (grid_y, grid_x)  # Julia expects (row, col)
+
+    return (grid_y, grid_x)
 
 # Buscar imagen de la casa (jpeg/jpg) en la carpeta del script
 base_path = os.path.dirname(__file__)
@@ -296,7 +282,7 @@ def find_floor_image():
 
 # API Communication Functions
 def send_mouse_position(mouse_id, position):
-    """Send mouse position to Julia API"""
+    """Enviar posición del ratón a la API de Julia"""
     if not API_AVAILABLE:
         return None
     try:
@@ -312,11 +298,11 @@ def send_mouse_position(mouse_id, position):
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        pass  # Error sending mouse position
+        pass 
     return None
 
 def send_cat_position(position):
-    """Send cat position to Julia API"""
+    """Enviar posición del gato a la API de Julia"""
     if not API_AVAILABLE:
         return None
     try:
@@ -332,11 +318,11 @@ def send_cat_position(position):
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        pass  # Error sending cat position
+        pass 
     return None
 
 def update_from_julia_simulation():
-    """Update all object positions from Julia Pacman simulation"""
+    """Actualiza todas las posiciones de los objetos desde la simulación de Pacman en Julia"""
     global ratones, gato, quesos, game_over, game_over_time, simulation_initialized
     
     if not julia_client:
@@ -346,12 +332,10 @@ def update_from_julia_simulation():
     if not game_state:
         return False
     
-    # Update cheese/banana positions (smooth update - no teleporting)
+    # Actualiza las posiciones de los quesos/bananas
     if "bananas" in game_state:
         global last_cheese_positions
         
-        # Convert Julia positions to a comparable set
-        # We combine normal, magic and green bananas for the change detection
         current_normal = set(tuple(p) for p in game_state.get("bananas", []))
         current_magic = set(tuple(p) for p in game_state.get("magic_bananas", []))
         current_green = set(tuple(p) for p in game_state.get("green_bananas", []))
@@ -359,25 +343,25 @@ def update_from_julia_simulation():
         # Create a combined signature to detect changes
         current_signature = (frozenset(current_normal), frozenset(current_magic), frozenset(current_green))
         
-        # Only update if cheese positions actually changed in Julia
+        # Solo se actualiza solo si hay cambios en las posiciones de los quesos en JULIA
         if current_signature != last_cheese_positions:
             quesos.clear()
             
-            # Add normal cheeses
+            # Agregamos quesos normales
             for banana_pos in game_state.get("bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
                 queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='normal')
                 queso.Position = world_pos
                 quesos.append(queso)
                 
-            # Add magic cheeses
+            # Agregamos quesos azules
             for banana_pos in game_state.get("magic_bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
                 queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='magic')
                 queso.Position = world_pos
                 quesos.append(queso)
 
-            # Add green cheeses
+            # Agregamos quesitos verdes
             for banana_pos in game_state.get("green_bananas", []):
                 world_pos = julia_to_python_coords(banana_pos)
                 queso = Queso(dim_board=DimBoard, scale=1.0, cheese_type='green')
@@ -386,84 +370,75 @@ def update_from_julia_simulation():
             
             last_cheese_positions = current_signature
     
-    # Update mice positions and handle captured mice
+    # Actualiza las posiciones de los ratones
     if "mice" in game_state:
         julia_mice = game_state["mice"]
         julia_mouse_ids = [mouse["id"] for mouse in julia_mice]
         
-        # Mark simulation as initialized when we receive mice
         if not simulation_initialized and len(julia_mice) > 0:
             if len(julia_mice) >= 4:
                 simulation_initialized = True
             elif len(julia_mice) >= 3:
                 simulation_initialized = True
             else:
-                # Still initialize with fewer mice to avoid infinite waiting
                 simulation_initialized = True
         
-        # First, mark all mice as captured (invisible)
-        # We track which ones were alive BEFORE this update to detect new captures
         previously_alive = [i for i, r in enumerate(ratones) if not r.captured]
         
         for i, raton in enumerate(ratones):
-            raton.captured = True  # Will be set to False if mouse still exists
+            raton.captured = True  
         
-        # Check for duplicate IDs
         if len(julia_mice) != len(set(julia_mouse_ids)):
-            pass  # Duplicate mouse IDs detected
+            pass  
         
-        # Update positions for mice that still exist in Julia simulation
         alive_indices = []
         for julia_mouse in julia_mice:
             mouse_id = julia_mouse["id"]
-            # Map Julia agent IDs to Python mice indices (1-based to 0-based)
             python_mouse_index = mouse_id - 1
             if 0 <= python_mouse_index < len(ratones):
                 world_pos = julia_to_python_coords(julia_mouse["pos"])
                 ratones[python_mouse_index].set_target_position(world_pos)
-                ratones[python_mouse_index].captured = False  # This mouse is still alive
+                ratones[python_mouse_index].captured = False 
                 
-                # Update powerup state
                 is_powered = julia_mouse.get("powered_up", False)
                 is_slowed = julia_mouse.get("slowed_down", False)
                 ratones[python_mouse_index].powered_up = is_powered
                 ratones[python_mouse_index].slowed_down = is_slowed
                 
-                # If powered up, increase max speed to allow for the double movement
+                # Muestra visualmente los poderes cuando un raton come el queso mágico
                 if is_powered:
-                    ratones[python_mouse_index].max_speed = 40.0 # Double speed limit
-                    ratones[python_mouse_index].interpolation_speed = 0.4 # Faster reaction
+                    ratones[python_mouse_index].max_speed = 40.0 
+                    ratones[python_mouse_index].interpolation_speed = 0.4 
                 elif is_slowed:
-                    ratones[python_mouse_index].max_speed = 10.0 # Half speed limit
-                    ratones[python_mouse_index].interpolation_speed = 0.1 # Slower reaction
+                    ratones[python_mouse_index].max_speed = 10.0 
+                    ratones[python_mouse_index].interpolation_speed = 0.1 
                 else:
-                    ratones[python_mouse_index].max_speed = 20.0 # Normal speed limit
-                    ratones[python_mouse_index].interpolation_speed = 0.2 # Normal reaction
+                    ratones[python_mouse_index].max_speed = 20.0
+                    ratones[python_mouse_index].interpolation_speed = 0.2 
                 
                 alive_indices.append(python_mouse_index)
             else:
-                pass  # Mouse ID out of range
+                pass  
         
-        # Detect if any mouse was JUST captured (was alive, now is not in alive_indices)
-        # Only trigger if simulation is running (not during initialization)
         if simulation_initialized:
             for idx in previously_alive:
                 if idx not in alive_indices:
-                    # Mouse 'idx' was just eaten!
                     if gato:
                         gato.trigger_eating()
-                    break # Only trigger once per frame even if multiple eaten
+                    
+                    # Squeak squeak (ratones lloran cuando son comidos)
+                    if squeak_sound:
+                        squeak_sound.play()
+                        
+                    break 
                 
-        # Check for game over condition
         if len(julia_mice) == 0 and not game_over:
             game_over = True
             game_over_time = time.time()
     
-    # Update cat position from Julia simulation
     if "cat" in game_state and game_state["cat"] and gato:
         cat_data = game_state["cat"]
         world_pos = julia_to_python_coords(cat_data["pos"])
-        # Cat is always simulation-controlled
         gato.set_target_position(world_pos)
     
     return True
@@ -562,23 +537,20 @@ def generar_escobas():
     escobas = Escoba.crear_escobas_predefinidas(dim_board=DimBoard, scale=35.0)
 
 def wait_for_julia_connection(max_attempts=30):
-    """Wait for Julia simulation to be fully available with all agents"""
     if not API_AVAILABLE:
         return False
         
     for attempt in range(max_attempts):
         try:
-            # Try to get game state
             response = requests.get(f"{API_BASE_URL}/game-state", timeout=1.0)
             if response.status_code == 200:
                 game_state = response.json()
-                # Check for complete simulation state
                 has_mice = "mice" in game_state and len(game_state["mice"]) >= 1
                 has_cat = "cat" in game_state and game_state["cat"] is not None
                 has_bananas = "bananas" in game_state and len(game_state["bananas"]) > 0
                 
                 if has_mice and has_cat and has_bananas:
-                    return True  # All components are ready
+                    return True 
             
             time.sleep(0.5)
         except Exception:
@@ -587,15 +559,12 @@ def wait_for_julia_connection(max_attempts=30):
     return False
 
 def generar_quesos():
-    """Generar quesos inicialmente vacíos, se llenarán con la API"""
     global quesos
     quesos = []
-    # Si no hay API, generar localmente de inmediato
     if not API_AVAILABLE:
         generar_quesos_localmente()
 
 def generar_quesos_localmente():
-    """Generar quesos localmente como respaldo"""
     global quesos
     quesos = Queso.crear_quesos_predefinidos(dim_board=DimBoard, scale=1.0)
 
@@ -622,16 +591,12 @@ def generar_ratones():
 def generar_gato():
     global gato
     
-    # Get obstacles for collision detection
     obstacles = get_obstacle_list()
     
     gato = Gato(dim_board=DimBoard, vel=1.0, scale=3.0)
-    # Initial position will be overridden by Julia simulation
     gato.Position = [0.0, 0.0, 0.0]  
     gato.Direction = [0.0, 0.0, -1.0]
-    # Set obstacles for collision detection
     gato.set_obstacles(obstacles)
-    # Cat is simulation-controlled
 
 def dibujar_escobas():
     for escoba in escobas:
@@ -664,7 +629,7 @@ def Init():
     glLoadIdentity()
     gluLookAt(EYE_X,EYE_Y,EYE_Z,CENTER_X,CENTER_Y,CENTER_Z,UP_X,UP_Y,UP_Z)
 
-    # Clear color visible si skybox no carga
+    # Clear color visible si skybox no carga - causa que el hideout sea blanco en vez de negro
     glClearColor(0.15,0.15,0.2,1.0)
     glEnable(GL_DEPTH_TEST)
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
@@ -677,7 +642,7 @@ def Init():
     #genera los objetos en las posiciones
     generar_ratones()  # Generar los 4 ratones
     generar_escobas()
-    generar_quesos()  # Now generates from API
+    generar_quesos()  
     generar_cajas()
     generar_gato()
 
@@ -685,7 +650,7 @@ def Init():
     img = find_house_image()
     if img:
         try:
-            load_texture_jpeg(img, repeat=False)  # Skybox no necesita repetir
+            load_texture_jpeg(img, repeat=False) 
         except Exception as e:
             pass
     
@@ -693,7 +658,7 @@ def Init():
     floor_img = find_floor_image()
     if floor_img:
         try:
-            floor_texture = load_texture_jpeg(floor_img, repeat=True)  # Piso sí necesita repetir
+            floor_texture = load_texture_jpeg(floor_img, repeat=True) 
         except Exception as e:
             pass
 
@@ -710,45 +675,45 @@ def lookat():
     glLoadIdentity()
     gluLookAt(EYE_X, EYE_Y, EYE_Z, CENTER_X, CENTER_Y, CENTER_Z, UP_X, UP_Y, UP_Z)
 
+def drawHideouts():
+    """Dibujado de las madrigueras"""
+    if Caja.modelo is None:
+        return
+
+    glDisable(GL_TEXTURE_2D)
+    glColor3f(0.0, 0.0, 0.0) #color neutro
+    
+    # Madriguera 1: Back Wall Center (0, 0, -300) -> Corresponde al de Julia (1, 9)
+    glPushMatrix()
+    glTranslatef(0, 0, -300) 
+    glScalef(12.0, 12.0, 12.0) # Same scale as mice
+    Caja.modelo.render()
+    glPopMatrix()
+    
+    # Madriguera 2: Front Wall Center (0, 0, 300) -> Corresponde al de Julia (14, 9)
+    glPushMatrix()
+    glTranslatef(0, 0, 300) 
+    glScalef(12.0, 12.0, 12.0) 
+    Caja.modelo.render()
+    glPopMatrix()
+    
+    glColor3f(1.0, 1.0, 1.0) 
+    glEnable(GL_TEXTURE_2D)
+
 # Función display principal: dibuja skybox y luego la escena (ratones y otros objetos)
 def display():
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    # Dibujar cubo/skybox exactamente del mismo tamaño que el piso
-    drawSkyboxHouse()  # Usa DimBoard por defecto
+    drawSkyboxHouse() 
     # Dibujar el suelo con textura
     drawFloor()
+    # Dibujar madrigueras
+    drawHideouts()
     # Dibujar todos los objetos
-    dibujar_ratones()  # Dibujar todos los ratones
+    dibujar_ratones()  
     dibujar_escobas()
     dibujar_quesos()
     dibujar_cajas()
     dibujar_gato()
-
-# Debugging para colisiones 
-def draw_collision_debug():
-    obstacles = get_obstacle_list()
-    
-    glDisable(GL_LIGHTING)
-    glDisable(GL_TEXTURE_2D)
-    glColor3f(1.0, 0.0, 0.0)  # Red color for collision zones
-    
-    for obstacle in obstacles:
-        glPushMatrix()
-        glTranslatef(obstacle.position[0], obstacle.position[1] + 1, obstacle.position[2])
-        
-        # Draw circle at ground level
-        glBegin(GL_LINE_LOOP)
-        for i in range(32):  # 32 segments for circle
-            angle = 2.0 * math.pi * i / 32
-            x = obstacle.radius * math.cos(angle)
-            z = obstacle.radius * math.sin(angle)
-            glVertex3f(x, 0, z)
-        glEnd()
-        
-        glPopMatrix()
-    
-    glColor3f(1.0, 1.0, 1.0)  
-    glEnable(GL_LIGHTING)
 
 def draw_connection_status():
     if simulation_initialized:
@@ -779,7 +744,7 @@ def draw_connection_status():
     glVertex2f(screen_width - margin - box_width, screen_height - margin)
     glEnd()
     
-    # icono de espera para indicar tiempo de conexion con julia [ASPECTO VISUAL]
+    # icono de espera para indicar tiempo de conexion con julia [ASPECTO VISUAL] 
     dot_phase = int(time.time() * 3) % 3 
     glColor3f(1.0, 1.0, 1.0)
     for i in range(3):
@@ -804,7 +769,7 @@ def draw_connection_status():
 
 # MAIN
 done = False
-debug_collision = False  # debugeo para las colisiones
+debug_collision = False  # depuración para las colisiones
 
 Init()
 
@@ -812,8 +777,6 @@ Init()
 if API_AVAILABLE:
     julia_client = JuliaClient(API_BASE_URL)
     julia_client.start()
-    # Removed blocking sleep here to prevent "Not Responding"
-    # time.sleep(1.0)  
 
 while not done:
     keys = pygame.key.get_pressed()
@@ -828,28 +791,24 @@ while not done:
     if game_over and time.time() - game_over_time >= GAME_OVER_DELAY:
         done = True
     
+    for raton in ratones:
+        raton.update()
+        raton.Position[1] = 0.0  
+        
+    if gato:
+        gato.update()
+    
     if not game_over:
-        # Actualizar todos los ratones
-        for raton in ratones:
-            raton.update()
-            raton.Position[1] = 0.0  # los mantiene en el piso
-        
-        if gato:
-            gato.update()
-        
-        # Integracion pacman y webapi
+        # Integracion pacman y webapi (MEJORADA)
         if API_AVAILABLE and julia_client:
             try:
                 active_mice = len([r for r in ratones if not r.captured])
                 
-                # Control simulation stepping via client
                 should_step = simulation_initialized and active_mice >= 1
                 julia_client.set_stepping(should_step)
                 
                 was_initialized = simulation_initialized
                 
-                # Update ONLY if new data is available from the thread
-                # This ensures perfect synchronization with the network thread
                 if update_from_julia_simulation():
                     if simulation_initialized and not was_initialized:
                         active_mice = len([r for r in ratones if not r.captured])
@@ -868,7 +827,7 @@ while not done:
         draw_connection_status()
     
     pygame.display.flip()
-    clock.tick(60) # Stabilize framerate at 60 FPS for smooth interpolation
+    clock.tick(60)
 
 if julia_client:
     julia_client.stop()

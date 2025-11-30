@@ -3,11 +3,7 @@ using Genie, Genie.Renderer.Json, Genie.Requests, HTTP
 using UUIDs
 
 route("/run") do
-    run!(model, 1)
-    
-    # Note: Banana maintenance is handled automatically in model_step!
-    
-    # Collect all agent positions (Same format as /game-state)
+    run!(model, 1)    
     mice_positions = []
     cat_position = nothing
     
@@ -55,7 +51,6 @@ route("/bananas") do
 end
 
 route("/regenerate-bananas") do
-    # Clear existing bananas and regenerate
     empty!(banana_positions)
     for i in 1:num_bananas_respawn
         place_banana_randomly()
@@ -64,7 +59,6 @@ route("/regenerate-bananas") do
 end
 
 route("/game-state") do
-    # Collect all agent positions
     mice_positions = []
     cat_position = nothing
     

@@ -70,17 +70,18 @@ class Raton:
 
         # Smooth movement for simulation-controlled mice
         self.target_position = self.Position.copy()
-        self.interpolation_speed = 0.25  # Tuned for 10 FPS updates at 60 FPS render
-        self.max_speed = 20.0 # High speed limit to prevent lagging behind
+        self.interpolation_speed = 0.25  
+        self.max_speed = 20.0 
+        self.move_speed = 0.0
         
-        # Capture state - when caught by cat
+        # Estado capturado 
         self.captured = False
         
-        # Powerup state
+        # Poderes magicos
         self.powered_up = False
         
-        # Collision system
-        self.obstacles = []  # Will be set by main.py
+        # Colisiones
+        self.obstacles = [] 
 
         # vector dirección en XZ (y no se usa para avanzar)
         dx = random.uniform(-1.0, 1.0)
@@ -90,15 +91,24 @@ class Raton:
         self.Direction = [dx / m, 0.0, dz / m]
 
     def set_target_position(self, target_pos):
-        """Set target position for smooth simulation movement"""
         self.target_position = target_pos.copy()
+        
+        # Calcular velocidad requerida para alcanzar el objetivo en aprox 9 a 10 frames
+        dx = self.target_position[0] - self.Position[0]
+        dz = self.target_position[2] - self.Position[2]
+        dist = math.sqrt(dx*dx + dz*dz)
+        
+        if dist > 200: 
+            self.move_speed = dist / 5.0 
+        else:
+            self.move_speed = dist / 9.0 
+            
+        if self.move_speed < 0.5: self.move_speed = 0.5
     
     def set_obstacles(self, obstacles):
-        """Set obstacle list for collision detection"""
         self.obstacles = obstacles
     
     def check_collision(self, position):
-        """Check if a position would cause collision with obstacles"""
         for obstacle in self.obstacles:
             dx = position[0] - obstacle.position[0]
             dz = position[2] - obstacle.position[2]
@@ -109,77 +119,76 @@ class Raton:
         return False
     
     def find_safe_move(self, target_pos):
-        """Find a safe position to move towards that avoids obstacles"""
         if not self.check_collision(target_pos):
             return target_pos
         
-        # If direct path is blocked, try alternative paths
         current_x, current_y, current_z = self.Position
         target_x, target_y, target_z = target_pos
         
-        # Try moving around obstacles by testing different angles
+        # Intentar moverse alrededor de los obstáculos probando diferentes ángulos
         for angle_offset in [math.pi/6, -math.pi/6, math.pi/3, -math.pi/3, math.pi/2, -math.pi/2]:
-            # Calculate direction to target
+            # Calcular dirección hacia el objetivo
             dx = target_x - current_x
             dz = target_z - current_z
             distance = math.sqrt(dx*dx + dz*dz)
             
             if distance > 0:
-                # Apply rotation to direction
+                # Aplicar rotación a la dirección
                 rotated_dx = dx * math.cos(angle_offset) - dz * math.sin(angle_offset)
                 rotated_dz = dx * math.sin(angle_offset) + dz * math.cos(angle_offset)
                 
-                # Move a small step in the rotated direction
-                step_size = 20.0  # Smaller step size for mice navigation
+                # Mover un pequeño paso en la dirección rotada
+                step_size = 20.0  # Tamaño de paso más pequeño para la navegación de ratones
                 new_x = current_x + (rotated_dx / distance) * step_size
                 new_z = current_z + (rotated_dz / distance) * step_size
                 
                 test_pos = [new_x, current_y, new_z]
                 
-                # Keep within bounds
+                # Limitar al dimboard
                 test_pos[0] = max(-300, min(300, test_pos[0]))
                 test_pos[2] = max(-300, min(300, test_pos[2]))
                 
                 if not self.check_collision(test_pos):
                     return test_pos
         
-        # If no safe path found, stay in place
         return self.Position.copy()
 
     def update(self):
-        # Don't update captured mice
         if self.captured:
             return
-            
-        # Handle simulation smooth movement interpolation
-        # With advanced collision sliding and SMOOTH turning
         
-        # Calculate distance to target
         dx = self.target_position[0] - self.Position[0]
         dz = self.target_position[2] - self.Position[2]
         distance = math.sqrt(dx*dx + dz*dz)
         
+        if distance > 100.0:
+            self.Position[0] = self.target_position[0]
+            self.Position[2] = self.target_position[2]
+            return
+
         if distance > 0.1:
-            # Calculate proposed movement
-            move_x = dx * self.interpolation_speed
-            move_z = dz * self.interpolation_speed
+            desired_dx = dx / distance
+            desired_dz = dz / distance
             
-            # Cap movement speed to prevent teleporting/glitching
+            step = self.move_speed
+            if step > distance: step = distance 
+            
+            move_x = desired_dx * step
+            move_z = desired_dz * step
+            
             move_dist = math.sqrt(move_x*move_x + move_z*move_z)
             if move_dist > self.max_speed:
                 scale = self.max_speed / move_dist
                 move_x *= scale
                 move_z *= scale
             
-            # Predict next position
             test_x = self.Position[0] + move_x
             test_z = self.Position[2] + move_z
             
-            # Track actual movement for rotation
             actual_move_x = move_x
             actual_move_z = move_z
             
-            # Check for collision
+            # Checa por colisiones
             collision_obstacle = None
             for obstacle in self.obstacles:
                 ox = test_x - obstacle.position[0]
@@ -190,12 +199,9 @@ class Raton:
                     break
             
             if collision_obstacle is None:
-                # No collision, move normally
                 self.Position[0] = test_x
                 self.Position[2] = test_z
             else:
-                # Collision detected! Slide around it (Tangent motion).
-                # Vector from obstacle center to agent (Normal vector)
                 normal_x = self.Position[0] - collision_obstacle.position[0]
                 normal_z = self.Position[2] - collision_obstacle.position[2]
                 norm_len = math.sqrt(normal_x*normal_x + normal_z*normal_z)
@@ -204,10 +210,8 @@ class Raton:
                     normal_x /= norm_len
                     normal_z /= norm_len
                     
-                    # Project movement vector onto tangent plane
                     dot_prod = move_x * normal_x + move_z * normal_z
                     
-                    # Only subtract the component if it's moving INTO the obstacle
                     if dot_prod < 0:
                         slide_x = move_x - dot_prod * normal_x
                         slide_z = move_z - dot_prod * normal_z
@@ -220,45 +224,46 @@ class Raton:
                         self.Position[0] += move_x
                         self.Position[2] += move_z
 
-                    # Soft push out to prevent sinking
                     overlap = (self.collision_radius + collision_obstacle.radius) - norm_len
                     if overlap > 0:
                         self.Position[0] += normal_x * overlap * 0.2
                         self.Position[2] += normal_z * overlap * 0.2
             
-            # Update direction to face ACTUAL movement direction (Smooth Turn)
             target_norm = math.sqrt(actual_move_x*actual_move_x + actual_move_z*actual_move_z)
             if target_norm > 0.001:
                 target_dx = actual_move_x / target_norm
                 target_dz = actual_move_z / target_norm
                 
-                # Interpolate current direction towards target direction (Smoothness factor 0.15)
-                self.Direction[0] += (target_dx - self.Direction[0]) * 0.15
-                self.Direction[2] += (target_dz - self.Direction[2]) * 0.15
+                current_angle = math.atan2(self.Direction[0], self.Direction[2])
+                target_angle = math.atan2(target_dx, target_dz)
                 
-                # Re-normalize
-                d_norm = math.sqrt(self.Direction[0]**2 + self.Direction[2]**2)
-                if d_norm > 0:
-                    self.Direction[0] /= d_norm
-                    self.Direction[2] /= d_norm
+                diff = target_angle - current_angle
+                while diff > math.pi: diff -= 2*math.pi
+                while diff < -math.pi: diff += 2*math.pi
+    
+                turn_speed = 0.2
+                if abs(diff) > math.pi / 2:
+                    turn_speed = 0.4
+                
+                new_angle = current_angle + diff * turn_speed
+                
+                self.Direction[0] = math.sin(new_angle)
+                self.Direction[2] = math.cos(new_angle)
             
             self.en_movimiento = True
         else:
             self.en_movimiento = False
-        
-        # Animation updates
+            
+        #Animacion
         if self.en_movimiento:
-            # Use frame-based animation for smoother movement
             self.anim_angle += self.anim_speed
         else:
-            # Slow down animation when not moving to create a natural stop
             if self.anim_speed > 1.0:
-                self.anim_speed *= 0.95  # Gradual slowdown
+                self.anim_speed *= 0.95 
             else:
                 self.anim_speed = 1.0
-            self.anim_angle += self.anim_speed * 0.3  # Slower idle animation
+            self.anim_angle += self.anim_speed * 0.3 
             
-        # Keep angle in reasonable range
         if self.anim_angle > 360:
             self.anim_angle -= 360
         elif self.anim_angle < 0:
@@ -266,7 +271,6 @@ class Raton:
             
         # Asegurar que el ratón siempre esté en el piso y dentro de límites de cámara
         self.Position[1] = 0.0
-        # Keep within camera bounds (±300)
         self.Position[0] = max(-300, min(300, self.Position[0]))
         self.Position[2] = max(-300, min(300, self.Position[2]))
                 
@@ -327,7 +331,6 @@ class Raton:
                 self.angulo_direccion = 0
 
     def draw(self):
-        # Don't draw captured mice
         if self.captured:
             return
             
@@ -343,13 +346,13 @@ class Raton:
         s = math.sin(t)
         c = math.cos(t)
        
-        # Apply powerup visual effect (Blue tint)
+        # Cambio de color al recibir efecto del queso mágico
         if self.powered_up:
             glDisable(GL_TEXTURE_2D)
-            glColor3f(0.0, 0.5, 1.0) # Blue tint
+            glColor3f(0.0, 0.5, 1.0) # tinta azul
         elif self.slowed_down:
             glDisable(GL_TEXTURE_2D)
-            glColor3f(0.0, 1.0, 0.0) # Green tint
+            glColor3f(0.0, 1.0, 0.0) # tinta verde
 
         glPushMatrix()
         glTranslatef(tx, ty, tz)
@@ -366,22 +369,19 @@ class Raton:
 
         # patas traseras (animadas)
         glPushMatrix()
-        # Enhanced leg animation - more pronounced when moving
         if self.en_movimiento:
-            movimiento_pata = math.sin(math.radians(self.anim_angle)) * 20  # Increased range
+            movimiento_pata = math.sin(math.radians(self.anim_angle)) * 20  
         else:
-            movimiento_pata = math.sin(math.radians(self.anim_angle)) * 5   # Subtle idle movement
+            movimiento_pata = math.sin(math.radians(self.anim_angle)) * 5   
         glTranslatef(0.0, 0.0, 0.0)
         glRotatef(movimiento_pata, 1.0, 0.0, 0.0)
         Raton.patastraseras.render()
         glPopMatrix()
 
-        # patas delanteras
         glPushMatrix()
         glTranslatef(0.0, 0.0, 0.0)
-        # Front legs move opposite to back legs for realistic gait
         if self.en_movimiento:
-            movimiento_pata_delantera = math.sin(math.radians(self.anim_angle + 180)) * 20  # 180° phase shift
+            movimiento_pata_delantera = math.sin(math.radians(self.anim_angle + 180)) * 20  
         else:
             movimiento_pata_delantera = math.sin(math.radians(self.anim_angle + 180)) * 5
         glRotatef(movimiento_pata_delantera, 1.0, 0.0, 0.0)
@@ -392,10 +392,8 @@ class Raton:
         glPushMatrix()
         glTranslatef(0.0, 0.0, 0.0)  
         if self.en_movimiento:
-            # More dynamic tail movement when walking
-            movimiento_cola = math.sin(math.radians(self.anim_angle * 1.5)) * 15  # Increased range and frequency
+            movimiento_cola = math.sin(math.radians(self.anim_angle * 1.5)) * 15 
         else:
-            # Gentle tail sway when idle
             movimiento_cola = math.sin(math.radians(self.anim_angle * 0.5)) * 5
         glRotatef(movimiento_cola, 0.0, 1.0, 0.0)  
         Raton.cola.render()
@@ -403,7 +401,7 @@ class Raton:
 
         glPopMatrix()
         
-        # Restore color if powered up or slowed down
+        # Regresa a color y texturas normales cuando se va el poder
         if self.powered_up or self.slowed_down:
             glColor3f(1.0, 1.0, 1.0)
             glEnable(GL_TEXTURE_2D)
